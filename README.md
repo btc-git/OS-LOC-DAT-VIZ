@@ -23,11 +23,10 @@ A standalone desktop application for **quick triage and initial visualization** 
 - Drag-and-drop file input
 - Built-in sample templates for proper formatting
 
-## Screenshots
+## Application Screenshot
 
 <div align="center">
-  <img src="screenshot.png" alt="Application Interface" width="700">
-  <p><em>Main application interface showing data input and visualization controls</em></p>
+  <img src="screenshot.PNG" alt="Application Interface" width="700">
 </div>
 
 ## How to Use
