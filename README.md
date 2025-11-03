@@ -26,7 +26,7 @@ A standalone desktop application for **quick triage and initial visualization** 
 ## Application Screenshot
 
 <div align="center">
-  <img src="screenshot.PNG" alt="Application Interface" width="700">
+  <img src="screenshot.PNG" alt="Application Interface" width="700" style="max-width: 50%;">
 </div>
 
 ## How to Use
