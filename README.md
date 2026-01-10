@@ -1,5 +1,10 @@
 # Open Source Location Data Visualizer
 
+### Development Transparency
+This application was developed with AI assistance and has undergone human review and testing. The program itself does not use AI. As with any AI-assisted software, additional scrutiny and verification are recommended before critical use.
+
+---
+
 A standalone desktop application for **quick triage and initial visualization** of location data. This tool converts data containing tower/sector, distance from tower, and location point information into KML files for preliminary analysis.
 
 ⚠️ **IMPORTANT: This is for initial review only. All findings must be analyzed and verified.**
