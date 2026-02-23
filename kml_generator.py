@@ -188,10 +188,10 @@ class KMLGenerator(QThread):
                 placemarks += self.create_sector_placemark(lat, lon, azimuth, timestamp)
                 
             elif not has_azimuth and has_distance:
-                # Case 3: Missing azimuth but has distance - create 360° circle at the distance
+                # Case 3: Missing azimuth but has distance - create distance band (donut/pizza-crust visualization)
                 missing_azimuth_count += 1
                 distance_miles = self.convert_ta_distance_to_miles(distance, self.settings.get('ta_distance_units', 'Meters'))
-                placemarks += self.create_distance_circle(lat, lon, timestamp, distance_miles)
+                placemarks += self.create_distance_band(lat, lon, timestamp, distance_miles)
                 
             else:
                 # Case 4: Missing both azimuth and distance - create 360° circle using shaded area length
@@ -483,6 +483,15 @@ class KMLGenerator(QThread):
                         hour = int(groups[3]) if len(groups) > 3 else 0
                         minute = int(groups[4]) if len(groups) > 4 else 0
                         second = int(groups[5]) if len(groups) > 5 else 0
+                        
+                        # Handle AM/PM (check if there's an AM/PM marker in the original string)
+                        ampm_match = re.search(r'\s([APap][Mm])\s*$', timestamp_str_clean)
+                        if ampm_match:
+                            ampm = ampm_match.group(1).lower()
+                            if ampm == 'pm' and hour != 12:
+                                hour += 12
+                            elif ampm == 'am' and hour == 12:
+                                hour = 0
                         
                         # Create datetime object
                         dt = datetime(year, month, day, hour, minute, second)
@@ -1019,6 +1028,87 @@ class KMLGenerator(QThread):
                     </Style>
                     <Point>
                         <coordinates>{lon},{lat},0</coordinates>
+                    </Point>
+                </Placemark>
+            </Folder>
+        ''')
+        
+        return placemark
+    
+    def create_distance_band(self, lat, lon, timestamp, distance_miles):
+        """Create a band polygon at the distance from tower (inner arc + outer arc + edges)"""
+        band_thickness = self.settings.get('band_thickness', 78.0)
+        band_units = self.settings.get('band_thickness_units', 'Meters')
+        band_color = self.settings.get('band_color', 'ff0099ff')
+        
+        # Convert band thickness to miles
+        band_thickness_miles = self.convert_ta_distance_to_miles(band_thickness, band_units)
+        outer_distance_miles = distance_miles + band_thickness_miles
+        
+        # Create inner and outer arc coordinates for the band
+        inner_coords = []
+        outer_coords = []
+        
+        # Generate 37 points around the circle (every 10 degrees, 0-360)
+        for bearing in range(0, 361, 10):
+            inner_point = self.destination_point(lat, lon, bearing, distance_miles)
+            outer_point = self.destination_point(lat, lon, bearing, outer_distance_miles)
+            inner_coords.append(f"{inner_point[1]:.6f},{inner_point[0]:.6f},0")
+            outer_coords.append(f"{outer_point[1]:.6f},{outer_point[0]:.6f},0")
+        
+        # Create the band polygon: inner arc + outer arc (reverse) + closing point
+        # The ring must close, so we go: inner_start -> inner_end -> outer_end -> outer_start -> inner_start
+        band_coords = inner_coords + list(reversed(outer_coords)) + [inner_coords[0]]
+        coordinates_string = ' '.join(band_coords)
+        
+        # Determine folder timestamp label
+        if isinstance(timestamp, tuple):
+            if timestamp[0]:  # If valid timestamp
+                timestamp_label = timestamp[1]
+            else:
+                timestamp_label = "Invalid Timestamp"
+        else:
+            timestamp_label = str(timestamp)
+        
+        placemark = textwrap.dedent(f'''
+            <Folder>
+                <name>Band {distance_miles:.2f}mi ± {band_thickness_miles:.2f}mi</name>
+                <description>Distance band from tower - {timestamp_label}</description>
+                <Placemark>
+                    <name>Band Polygon</name>
+                    <Style>
+                        <PolyStyle>
+                            <color>{band_color}</color>
+                            <fill>1</fill>
+                            <outline>1</outline>
+                        </PolyStyle>
+                        <LineStyle>
+                            <color>{band_color}</color>
+                            <width>2</width>
+                        </LineStyle>
+                    </Style>
+                    <Polygon>
+                        <outerBoundaryIs>
+                            <LinearRing>
+                                <coordinates>
+{textwrap.indent(coordinates_string, " " * 32)}
+                                </coordinates>
+                            </LinearRing>
+                        </outerBoundaryIs>
+                    </Polygon>
+                </Placemark>
+                <Placemark>
+                    <name>Center</name>
+                    <Style>
+                        <IconStyle>
+                            <Icon>
+                                <href>http://maps.google.com/mapfiles/kml/pushpin/wht-pushpin.png</href>
+                            </Icon>
+                            <color>ff0000ff</color>
+                        </IconStyle>
+                    </Style>
+                    <Point>
+                        <coordinates>{lon:.6f},{lat:.6f},0</coordinates>
                     </Point>
                 </Placemark>
             </Folder>
