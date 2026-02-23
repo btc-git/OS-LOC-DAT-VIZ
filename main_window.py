@@ -298,14 +298,33 @@ class MainWindow(QMainWindow):
         self.ta_distance_units_combo.setCurrentText("Miles")  # Default to miles for distance from tower
         viz_layout.addWidget(self.ta_distance_units_combo, 5, 1)
         
+        # Distance Band Thickness value
+        band_thickness_label = QLabel("Distance Band Thickness:")
+        band_thickness_label.setToolTip("Thickness of the distance band around the tower (inner distance to inner distance + thickness)")
+        viz_layout.addWidget(band_thickness_label, 6, 0)
+        self.band_thickness_spinbox = QDoubleSpinBox()
+        self.band_thickness_spinbox.setRange(0.1, 10000.0)
+        self.band_thickness_spinbox.setValue(78.0)  # Default 78 meters
+        self.band_thickness_spinbox.setSingleStep(1.0)
+        viz_layout.addWidget(self.band_thickness_spinbox, 6, 1)
+        
+        # Distance Band Thickness units dropdown
+        band_units_label = QLabel("Band Thickness Units:")
+        band_units_label.setToolTip("Units for the distance band thickness")
+        viz_layout.addWidget(band_units_label, 7, 0)
+        self.band_thickness_units_combo = QComboBox()
+        self.band_thickness_units_combo.addItems(["Meters", "Miles"])
+        self.band_thickness_units_combo.setCurrentText("Meters")  # Default to meters
+        viz_layout.addWidget(self.band_thickness_units_combo, 7, 1)
+        
         # Duration setting for time animation
         duration_label = QLabel("Animation Duration (minutes):")
         duration_label.setToolTip("How long each visualization stays visible during time animation (end time = start time + duration)")
-        viz_layout.addWidget(duration_label, 6, 0)
+        viz_layout.addWidget(duration_label, 8, 0)
         self.duration_spinbox = QSpinBox()
         self.duration_spinbox.setRange(1, 1440)  # 1 minute to 24 hours
         self.duration_spinbox.setValue(30)  # Default to 30 minutes
-        viz_layout.addWidget(self.duration_spinbox, 6, 1)
+        viz_layout.addWidget(self.duration_spinbox, 8, 1)
         
         
         tab_widget.addTab(viz_tab, "Settings")
@@ -338,15 +357,23 @@ class MainWindow(QMainWindow):
         self.ta_color_button.clicked.connect(lambda: self.select_color("ta"))
         color_layout.addWidget(self.ta_color_button, 2, 1)
         
+        # Distance Band color
+        color_layout.addWidget(QLabel("Distance Band Color:"), 3, 0)
+        self.band_color_button = QPushButton()
+        self.band_color = "ff0099ff"  # Orange
+        self.band_color_button.setStyleSheet(f"background-color: {self.kml_to_qt_color(self.band_color)}")
+        self.band_color_button.clicked.connect(lambda: self.select_color("band"))
+        color_layout.addWidget(self.band_color_button, 3, 1)
+        
         # Location Point color
-        color_layout.addWidget(QLabel("Location Point Color:"), 3, 0)
+        color_layout.addWidget(QLabel("Location Point Color:"), 4, 0)
         self.gps_color_button = QPushButton()
         self.gps_color = "ff00ff00"  # Green
         self.gps_color_button.setStyleSheet(f"background-color: {self.kml_to_qt_color(self.gps_color)}")
         self.gps_color_button.clicked.connect(lambda: self.select_color("gps"))
-        color_layout.addWidget(self.gps_color_button, 3, 1)
+        color_layout.addWidget(self.gps_color_button, 4, 1)
         
-        color_layout.setRowStretch(4, 1)
+        color_layout.setRowStretch(5, 1)
         
         tab_widget.addTab(color_tab, "Colors")
         
@@ -765,9 +792,12 @@ class MainWindow(QMainWindow):
             'leg_color': self.leg_color,
             'shaded_color': self.shaded_color,
             'ta_color': self.ta_color,
+            'band_color': self.band_color,
             'gps_color': self.gps_color,
             'gps_units': self.gps_units_combo.currentText(),
             'ta_distance_units': self.ta_distance_units_combo.currentText(),
+            'band_thickness': self.band_thickness_spinbox.value(),
+            'band_thickness_units': self.band_thickness_units_combo.currentText(),
             'default_accuracy': self.default_accuracy_spinbox.value(),
             'enable_time_animation': True,  # Always enabled
             'duration_minutes': self.duration_spinbox.value(),
