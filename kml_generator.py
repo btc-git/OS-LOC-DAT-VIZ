@@ -915,33 +915,9 @@ class KMLGenerator(QThread):
                 </Placemark>
         ''')
         
-        # 4. Create the distance arc
-        placemark += textwrap.dedent(f'''\
-                <Placemark>
-                    <name>{display_label} Distance Arc ({distance_miles:.2f} mi)</name>
-        ''')
-        
-        placemark += self.create_time_element(kml_timestamp, "            ")
-        
-        placemark += textwrap.dedent(f'''\
-                    <Style>
-                        <LineStyle><color>{self.settings['ta_color']}</color><width>3</width></LineStyle>
-                    </Style>
-                    <LineString>
-                        <coordinates>
-        ''')
-        
-        # Generate arc points for the distance arc
-        for i in range(num_points + 1):
-            angle = start_angle + (i / num_points) * azimuth_spread
-            arc_lat, arc_lon = self.destination_point(lat, lon, angle, distance_miles)
-            placemark += f"                            {arc_lon},{arc_lat},0\n"
-        
-        placemark += textwrap.dedent('''\
-                        </coordinates>
-                    </LineString>
-                </Placemark>
-        ''')
+        # 4. Create the distance band (instead of arc line)
+        band_placemark = self.create_sector_distance_band(lat, lon, timestamp, distance_miles, start_angle, end_angle)
+        placemark += textwrap.indent(band_placemark, "        ")
         
         # 5. Add invisible center point label to show timestamp
         placemark += textwrap.dedent(f'''\
@@ -966,6 +942,73 @@ class KMLGenerator(QThread):
                     </Point>
                 </Placemark>
             </Folder>
+        ''')
+        
+        return placemark
+    
+    def create_sector_distance_band(self, lat, lon, timestamp, distance_miles, start_angle, end_angle):
+        """Create a band polygon constrained to a sector wedge (for Case 1: azimuth + distance)"""
+        band_thickness = self.settings.get('band_thickness', 78.0)
+        band_units = self.settings.get('band_thickness_units', 'Meters')
+        band_color = self.settings.get('band_color', 'ff0099ff')
+        
+        # Convert band thickness to miles
+        band_thickness_miles = self.convert_ta_distance_to_miles(band_thickness, band_units)
+        outer_distance_miles = distance_miles + band_thickness_miles
+        
+        # Create inner and outer arc coordinates for the sector band
+        inner_coords = []
+        outer_coords = []
+        
+        # Get settings for calculation
+        num_points = self.settings.get('num_points', 20)
+        
+        # Generate points along the sector (from start_angle to end_angle)
+        for i in range(num_points + 1):
+            angle = start_angle + (i / num_points) * (end_angle - start_angle)
+            inner_point = self.destination_point(lat, lon, angle, distance_miles)
+            outer_point = self.destination_point(lat, lon, angle, outer_distance_miles)
+            inner_coords.append(f"{inner_point[1]:.6f},{inner_point[0]:.6f},0")
+            outer_coords.append(f"{outer_point[1]:.6f},{outer_point[0]:.6f},0")
+        
+        # Create the sector band polygon: inner arc + outer arc (reverse) + closing edges
+        # Order: start on inner arc, go to end, then outer arc back to start
+        band_coords = inner_coords + list(reversed(outer_coords)) + [inner_coords[0]]
+        coordinates_string = ' '.join(band_coords)
+        
+        # Determine folder timestamp label
+        if isinstance(timestamp, tuple):
+            if timestamp[0]:  # If valid timestamp
+                timestamp_label = timestamp[1]
+            else:
+                timestamp_label = "Invalid Timestamp"
+        else:
+            timestamp_label = str(timestamp)
+        
+        placemark = textwrap.dedent(f'''
+            <Placemark>
+                <name>Distance Band ({distance_miles:.2f}mi ± {band_thickness_miles:.2f}mi)</name>
+                <Style>
+                    <PolyStyle>
+                        <color>{band_color}</color>
+                        <fill>1</fill>
+                        <outline>1</outline>
+                    </PolyStyle>
+                    <LineStyle>
+                        <color>{band_color}</color>
+                        <width>2</width>
+                    </LineStyle>
+                </Style>
+                <Polygon>
+                    <outerBoundaryIs>
+                        <LinearRing>
+                            <coordinates>
+{textwrap.indent(coordinates_string, " " * 32)}
+                            </coordinates>
+                        </LinearRing>
+                    </outerBoundaryIs>
+                </Polygon>
+            </Placemark>
         ''')
         
         return placemark
