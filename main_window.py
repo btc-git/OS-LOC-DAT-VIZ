@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QGridLayout, QPushButton, QLabel, QFileDialog, 
                              QSpinBox, QDoubleSpinBox, QRadioButton, QButtonGroup, 
                              QTextEdit, QGroupBox, QColorDialog, QProgressBar, 
-                             QMessageBox, QTabWidget, QCheckBox, QMenu, QComboBox, QLineEdit)
+                             QMessageBox, QTabWidget, QCheckBox, QMenu, QComboBox, QLineEdit, QFrame, QScrollArea)
 from PyQt6.QtCore import Qt, QSettings
 from PyQt6.QtGui import QFont, QColor, QIcon, QPixmap, QPainter, QPen
 
@@ -24,7 +24,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Open Source Location Data Visualizer")
-        self.setGeometry(100, 100, 600, 820)  # Increased from 780 to 820 for more comfortable spacing
+        self.setGeometry(100, 100, 600, 800)  # Increased height to give Settings pane more space
         
         # Set custom window icon
         self.setWindowIcon(self.create_pushpin_icon())
@@ -216,7 +216,7 @@ class MainWindow(QMainWindow):
         label_layout.addWidget(custom_label_desc)
         
         self.custom_label_input = QLineEdit()
-        self.custom_label_input.setPlaceholderText("e.g., 'August 1 Warrant - Timing Advance'")
+        self.custom_label_input.setPlaceholderText("e.g., 'August 1 Warrant - Distance from Tower'")
         self.custom_label_input.setMaximumWidth(300)
         self.custom_label_input.setStyleSheet("""
             QLineEdit {
@@ -240,94 +240,181 @@ class MainWindow(QMainWindow):
         # Visualization Settings Tab
         viz_tab = QWidget()
         viz_layout = QGridLayout(viz_tab)
-        viz_layout.setVerticalSpacing(10)
+        viz_layout.setVerticalSpacing(8)  # Compact spacing for Settings controls
+        
+        row = 0
+        
+        # ============ TOWER/SECTOR SETTINGS ============
+        tower_label = QLabel("Tower/Sector Settings")
+        tower_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        tower_label.setStyleSheet("color: #4ecdc4; font-weight: bold; font-size: 14px;")
+        viz_layout.addWidget(tower_label, row, 0, 1, 2)
+        row += 1
         
         # Leg length
         leg_length_label = QLabel("Tower/Sector Leg Length (miles):")
         leg_length_label.setToolTip("Length of the lines extending from the tower")
-        viz_layout.addWidget(leg_length_label, 0, 0)
+        viz_layout.addWidget(leg_length_label, row, 0)
         self.leg_length_spinbox = QDoubleSpinBox()
         self.leg_length_spinbox.setRange(0.5, 20.0)
         self.leg_length_spinbox.setValue(3.0)
         self.leg_length_spinbox.setSingleStep(0.5)
-        viz_layout.addWidget(self.leg_length_spinbox, 0, 1)
+        viz_layout.addWidget(self.leg_length_spinbox, row, 1)
+        row += 1
         
         # Shaded area length
         shaded_area_label = QLabel("Tower/Sector Shaded Area Length (miles):")
         shaded_area_label.setToolTip("Length of the shaded wedge (can be shorter or equal to leg length)")
-        viz_layout.addWidget(shaded_area_label, 1, 0)
+        viz_layout.addWidget(shaded_area_label, row, 0)
         self.shaded_area_spinbox = QDoubleSpinBox()
         self.shaded_area_spinbox.setRange(0.1, 10.0)
         self.shaded_area_spinbox.setValue(1.0)
         self.shaded_area_spinbox.setSingleStep(0.1)
-        viz_layout.addWidget(self.shaded_area_spinbox, 1, 1)
+        viz_layout.addWidget(self.shaded_area_spinbox, row, 1)
+        row += 1
         
         # Shaded area azimuth and width
         azimuth_label = QLabel("Tower/Sector Width (degrees):")
         azimuth_label.setToolTip("Angular width of the tower sector shaded area")
-        viz_layout.addWidget(azimuth_label, 2, 0)
+        viz_layout.addWidget(azimuth_label, row, 0)
         self.azimuth_spinbox = QSpinBox()
         self.azimuth_spinbox.setRange(30, 360)
         self.azimuth_spinbox.setValue(120)
-        viz_layout.addWidget(self.azimuth_spinbox, 2, 1)
+        viz_layout.addWidget(self.azimuth_spinbox, row, 1)
+        row += 1
         
-        # Location Point accuracy units dropdown
-        gps_units_label = QLabel("Location Point Accuracy Units:")
-        gps_units_label.setToolTip("Select the units used for location point accuracy in your data")
-        viz_layout.addWidget(gps_units_label, 3, 0)
-        self.gps_units_combo = QComboBox()
-        self.gps_units_combo.addItems(["Meters", "Feet", "Miles", "Kilometers"])
-        self.gps_units_combo.setCurrentText("Meters")  # Default to meters
-        viz_layout.addWidget(self.gps_units_combo, 3, 1)
+        # Separator
+        separator1 = QFrame()
+        separator1.setFrameShape(QFrame.Shape.HLine)
+        separator1.setFrameShadow(QFrame.Shadow.Sunken)
+        separator1.setStyleSheet("color: #333333;")
+        viz_layout.addWidget(separator1, row, 0, 1, 2)
+        row += 1
         
-        # Default Location Point accuracy for missing data
-        default_accuracy_label = QLabel("Default Location Accuracy:")
-        default_accuracy_label.setToolTip("Default accuracy radius used when input location point data has no accuracy value (uses Location Point Accuracy Units above)")
-        viz_layout.addWidget(default_accuracy_label, 4, 0)
-        self.default_accuracy_spinbox = QSpinBox()
-        self.default_accuracy_spinbox.setRange(1, 10000)
-        self.default_accuracy_spinbox.setValue(100)  # Default 100
-        viz_layout.addWidget(self.default_accuracy_spinbox, 4, 1)
+        # ============ DISTANCE FROM TOWER SETTINGS ============
+        ta_label = QLabel("Distance from Tower Settings")
+        ta_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ta_label.setStyleSheet("color: #4ecdc4; font-weight: bold; font-size: 14px;")
+        viz_layout.addWidget(ta_label, row, 0, 1, 2)
+        row += 1
         
         # Distance from Tower units dropdown
         ta_distance_units_label = QLabel("Distance from Tower Units:")
         ta_distance_units_label.setToolTip("Select the units used for distance from tower in your data")
-        viz_layout.addWidget(ta_distance_units_label, 5, 0)
+        viz_layout.addWidget(ta_distance_units_label, row, 0)
         self.ta_distance_units_combo = QComboBox()
         self.ta_distance_units_combo.addItems(["Meters", "Feet", "Miles", "Kilometers"])
         self.ta_distance_units_combo.setCurrentText("Miles")  # Default to miles for distance from tower
-        viz_layout.addWidget(self.ta_distance_units_combo, 5, 1)
+        viz_layout.addWidget(self.ta_distance_units_combo, row, 1)
+        row += 1
         
-        # Distance Band Thickness value
-        band_thickness_label = QLabel("Distance Band Thickness:")
-        band_thickness_label.setToolTip("Thickness of the distance band around the tower (inner distance to inner distance + thickness)")
-        viz_layout.addWidget(band_thickness_label, 6, 0)
+        # Inside Band Distance (before distance - extends inward from distance point)
+        inside_band_label = QLabel("Band Distance Before (Inner):")
+        inside_band_label.setToolTip("Distance extending inward from the distance value (creates band from distance - this value to distance)")
+        viz_layout.addWidget(inside_band_label, row, 0)
+        self.inside_band_spinbox = QDoubleSpinBox()
+        self.inside_band_spinbox.setRange(0.0, 10000.0)
+        self.inside_band_spinbox.setValue(0.0)  # Default 0 (no inner band)
+        self.inside_band_spinbox.setSingleStep(1.0)
+        viz_layout.addWidget(self.inside_band_spinbox, row, 1)
+        row += 1
+        
+        # Outside Band Distance (after distance - extends outward from distance point)
+        outside_band_label = QLabel("Band Distance After (Outer):")
+        outside_band_label.setToolTip("Distance extending outward from the distance value (creates band from distance to distance + this value)")
+        viz_layout.addWidget(outside_band_label, row, 0)
         self.band_thickness_spinbox = QDoubleSpinBox()
         self.band_thickness_spinbox.setRange(0.1, 10000.0)
         self.band_thickness_spinbox.setValue(78.0)  # Default 78 meters
         self.band_thickness_spinbox.setSingleStep(1.0)
-        viz_layout.addWidget(self.band_thickness_spinbox, 6, 1)
+        viz_layout.addWidget(self.band_thickness_spinbox, row, 1)
+        row += 1
         
-        # Distance Band Thickness units dropdown
-        band_units_label = QLabel("Band Thickness Units:")
-        band_units_label.setToolTip("Units for the distance band thickness")
-        viz_layout.addWidget(band_units_label, 7, 0)
+        # Band Distance Units dropdown
+        band_units_label = QLabel("Band Distance Units:")
+        band_units_label.setToolTip("Units for both inner and outer band distances")
+        viz_layout.addWidget(band_units_label, row, 0)
         self.band_thickness_units_combo = QComboBox()
         self.band_thickness_units_combo.addItems(["Meters", "Miles"])
         self.band_thickness_units_combo.setCurrentText("Meters")  # Default to meters
-        viz_layout.addWidget(self.band_thickness_units_combo, 7, 1)
+        viz_layout.addWidget(self.band_thickness_units_combo, row, 1)
+        row += 1
+        
+        # Separator
+        separator2 = QFrame()
+        separator2.setFrameShape(QFrame.Shape.HLine)
+        separator2.setFrameShadow(QFrame.Shadow.Sunken)
+        separator2.setStyleSheet("color: #333333;")
+        viz_layout.addWidget(separator2, row, 0, 1, 2)
+        row += 1
+        
+        # ============ LOCATION POINT SETTINGS ============
+        gps_label = QLabel("Location Point Settings")
+        gps_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        gps_label.setStyleSheet("color: #4ecdc4; font-weight: bold; font-size: 14px;")
+        viz_layout.addWidget(gps_label, row, 0, 1, 2)
+        row += 1
+        
+        # Location Point accuracy units dropdown
+        gps_units_label = QLabel("Location Point Accuracy Units:")
+        gps_units_label.setToolTip("Select the units used for location point accuracy in your data")
+        viz_layout.addWidget(gps_units_label, row, 0)
+        self.gps_units_combo = QComboBox()
+        self.gps_units_combo.addItems(["Meters", "Feet", "Miles", "Kilometers"])
+        self.gps_units_combo.setCurrentText("Meters")  # Default to meters
+        viz_layout.addWidget(self.gps_units_combo, row, 1)
+        row += 1
+        
+        # Default Location Point accuracy for missing data
+        default_accuracy_label = QLabel("Default Location Accuracy:")
+        default_accuracy_label.setToolTip("Default accuracy radius used when input location point data has no accuracy value (uses Location Point Accuracy Units above)")
+        viz_layout.addWidget(default_accuracy_label, row, 0)
+        self.default_accuracy_spinbox = QSpinBox()
+        self.default_accuracy_spinbox.setRange(1, 10000)
+        self.default_accuracy_spinbox.setValue(100)  # Default 100
+        viz_layout.addWidget(self.default_accuracy_spinbox, row, 1)
+        row += 1
+        
+        # Separator
+        separator3 = QFrame()
+        separator3.setFrameShape(QFrame.Shape.HLine)
+        separator3.setFrameShadow(QFrame.Shadow.Sunken)
+        separator3.setStyleSheet("color: #333333;")
+        viz_layout.addWidget(separator3, row, 0, 1, 2)
+        row += 1
+        
+        # ============ TIMELINE SETTINGS ============
+        timeline_label = QLabel("Timeline Settings")
+        timeline_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        timeline_label.setStyleSheet("color: #4ecdc4; font-weight: bold; font-size: 14px;")
+        viz_layout.addWidget(timeline_label, row, 0, 1, 2)
+        row += 1
         
         # Duration setting for time animation
         duration_label = QLabel("Animation Duration (minutes):")
         duration_label.setToolTip("How long each visualization stays visible during time animation (end time = start time + duration)")
-        viz_layout.addWidget(duration_label, 8, 0)
+        viz_layout.addWidget(duration_label, row, 0)
         self.duration_spinbox = QSpinBox()
         self.duration_spinbox.setRange(1, 1440)  # 1 minute to 24 hours
         self.duration_spinbox.setValue(30)  # Default to 30 minutes
-        viz_layout.addWidget(self.duration_spinbox, 8, 1)
+        viz_layout.addWidget(self.duration_spinbox, row, 1)
+        row += 1
         
+        # Add stretch to push controls to top and provide breathing room
+        viz_layout.setRowStretch(row, 1)
         
-        tab_widget.addTab(viz_tab, "Settings")
+        # Make Settings tab scrollable so controls have breathing room
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setWidget(viz_tab)
+        scroll_area.setStyleSheet("""
+            QScrollArea { border: none; background-color: #1e1e1e; }
+            QScrollBar:vertical { width: 12px; }
+            QScrollBar::handle:vertical { background-color: #444444; border-radius: 6px; }
+            QScrollBar::handle:vertical:hover { background-color: #555555; }
+        """)
+        
+        tab_widget.addTab(scroll_area, "Settings")
         
         # Colors Tab
         color_tab = QWidget()
@@ -349,38 +436,30 @@ class MainWindow(QMainWindow):
         self.shaded_color_button.clicked.connect(lambda: self.select_color("shaded"))
         color_layout.addWidget(self.shaded_color_button, 1, 1)
         
-        # Distance from Tower color
-        color_layout.addWidget(QLabel("Distance from Tower Arc Color:"), 2, 0)
-        self.ta_color_button = QPushButton()
-        self.ta_color = "ff0000ff"  # Red
-        self.ta_color_button.setStyleSheet(f"background-color: {self.kml_to_qt_color(self.ta_color)}")
-        self.ta_color_button.clicked.connect(lambda: self.select_color("ta"))
-        color_layout.addWidget(self.ta_color_button, 2, 1)
-        
         # Distance Band color
-        color_layout.addWidget(QLabel("Distance Band Color:"), 3, 0)
+        color_layout.addWidget(QLabel("Distance Band Color:"), 2, 0)
         self.band_color_button = QPushButton()
         self.band_color = "ff0099ff"  # Orange
         self.band_color_button.setStyleSheet(f"background-color: {self.kml_to_qt_color(self.band_color)}")
         self.band_color_button.clicked.connect(lambda: self.select_color("band"))
-        color_layout.addWidget(self.band_color_button, 3, 1)
+        color_layout.addWidget(self.band_color_button, 2, 1)
         
         # Location Point color
-        color_layout.addWidget(QLabel("Location Point Color:"), 4, 0)
+        color_layout.addWidget(QLabel("Location Point Color:"), 3, 0)
         self.gps_color_button = QPushButton()
         self.gps_color = "ff00ff00"  # Green
         self.gps_color_button.setStyleSheet(f"background-color: {self.kml_to_qt_color(self.gps_color)}")
         self.gps_color_button.clicked.connect(lambda: self.select_color("gps"))
-        color_layout.addWidget(self.gps_color_button, 4, 1)
+        color_layout.addWidget(self.gps_color_button, 3, 1)
         
-        color_layout.setRowStretch(5, 1)
+        color_layout.setRowStretch(4, 1)
         
         tab_widget.addTab(color_tab, "Colors")
         
         # Set maximum height for tab widget to prevent excessive space
         tab_widget.setMaximumHeight(320)
         
-        layout.addWidget(tab_widget, 0)  # No stretch for tabs
+        layout.addWidget(tab_widget, 2)  # Give more space to Settings tab
         
         # Progress bar
         self.progress_bar = QProgressBar()
@@ -424,13 +503,14 @@ class MainWindow(QMainWindow):
         
         # Status text
         self.status_text = QTextEdit()
-        self.status_text.setMinimumHeight(80)
+        self.status_text.setMinimumHeight(60)  # Reduced from 80
+        self.status_text.setMaximumHeight(100)  # Reduced from 120
         self.status_text.setReadOnly(True)
-        layout.addWidget(self.status_text, 1)  # Add stretch to fill remaining space
+        layout.addWidget(self.status_text, 0)  # No stretch - keep minimal
         
         # Footer with version info (clickable links)
         footer_layout = QHBoxLayout()
-        footer_layout.setContentsMargins(0, 5, 0, 5) # top and bottom margins
+        footer_layout.setContentsMargins(0, 2, 0, 2)  # Minimal top and bottom margins
         version_label = QLabel('v1.0 | <a href="https://github.com/btc-git/OS-LOC-DAT-VIZ" style="color: #4ecdc4; text-decoration: none;">Open Source Location Data Visualizer</a> | <a href="license://show" style="color: #4ecdc4; text-decoration: none;">GPL v3.0</a>')
         version_label.setStyleSheet("color: #666666; font-size: 10px; font-style: italic;")
         version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -621,7 +701,7 @@ class MainWindow(QMainWindow):
                 any(col in ['timestamp', 'date & time', 'datetime', 'time'] for col in columns) and
                 any(col in ['azimuth', 'bearing', 'direction'] for col in columns) and
                 any(col in ['distance', 'range', 'distance (m)', 'distance (meters)'] for col in columns)):
-                detected_type = "timing_advance"
+                detected_type = "distance_from_tower"
                 self.ta_radio.setChecked(True)
                 self.add_status_message("✅ Valid Distance from Tower template detected")
                 
@@ -658,7 +738,7 @@ class MainWindow(QMainWindow):
                     self.tower_radio.setEnabled(True)
                     self.ta_radio.setEnabled(False)
                     self.gps_radio.setEnabled(False)
-                elif detected_type == "timing_advance":
+                elif detected_type == "distance_from_tower":
                     self.tower_radio.setEnabled(False)
                     self.ta_radio.setEnabled(True)
                     self.gps_radio.setEnabled(False)
@@ -791,12 +871,12 @@ class MainWindow(QMainWindow):
             'num_points': 25,  # value for arc smoothness
             'leg_color': self.leg_color,
             'shaded_color': self.shaded_color,
-            'ta_color': self.ta_color,
             'band_color': self.band_color,
             'gps_color': self.gps_color,
             'gps_units': self.gps_units_combo.currentText(),
             'ta_distance_units': self.ta_distance_units_combo.currentText(),
-            'band_thickness': self.band_thickness_spinbox.value(),
+            'band_thickness_before': self.inside_band_spinbox.value(),  # New: inner band distance
+            'band_thickness': self.band_thickness_spinbox.value(),  # Outer band distance
             'band_thickness_units': self.band_thickness_units_combo.currentText(),
             'default_accuracy': self.default_accuracy_spinbox.value(),
             'enable_time_animation': True,  # Always enabled
@@ -889,7 +969,7 @@ class MainWindow(QMainWindow):
         
         # Distance from Tower template
         ta_action = menu.addAction("📏 Distance from Tower Template")
-        ta_action.triggered.connect(lambda: self.download_template("timing_advance"))
+        ta_action.triggered.connect(lambda: self.download_template("distance_from_tower"))
         
         # Point Location template
         gps_action = menu.addAction("📌 Location Point Template")
@@ -920,8 +1000,8 @@ class MainWindow(QMainWindow):
                 "description": "Tower/Sector Data Template"
             },
 
-            "timing_advance": {
-                "filename": "timing_advance_template.csv",
+            "distance_from_tower": {
+                "filename": "distance_from_tower_template.csv",
                 "headers": ["Timestamp", "Latitude", "Longitude", "Azimuth", "Distance"],
                 "sample_data": [
                     ["2024-01-15 14:00:00", 43.15831, -77.60938, 240, 0.8],
