@@ -326,8 +326,8 @@ class MainWindow(QMainWindow):
         outside_band_label.setToolTip("Distance extending outward from the distance value (creates band from distance to distance + this value)")
         viz_layout.addWidget(outside_band_label, row, 0)
         self.band_thickness_spinbox = QDoubleSpinBox()
-        self.band_thickness_spinbox.setRange(0.1, 10000.0)
-        self.band_thickness_spinbox.setValue(78.0)  # Default 78 meters
+        self.band_thickness_spinbox.setRange(0.0, 10000.0)
+        self.band_thickness_spinbox.setValue(0.0)  # Default 0 meters
         self.band_thickness_spinbox.setSingleStep(1.0)
         viz_layout.addWidget(self.band_thickness_spinbox, row, 1)
         row += 1

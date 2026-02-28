@@ -96,12 +96,9 @@ class KMLGenerator(QThread):
         
         kml_header = textwrap.dedent(f'''\
             <?xml version="1.0" encoding="UTF-8"?>
-            <kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2">
+            <kml xmlns="http://www.opengis.net/kml/2.2">
             <Document>
                 <name>{doc_name}</name>
-                <gx:AnimatedUpdate>
-                    <gx:duration>0.0</gx:duration>
-                </gx:AnimatedUpdate>
         ''')
         
         kml_footer = textwrap.dedent('''\
@@ -152,12 +149,9 @@ class KMLGenerator(QThread):
         
         kml_header = textwrap.dedent(f'''\
             <?xml version="1.0" encoding="UTF-8"?>
-            <kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2">
+            <kml xmlns="http://www.opengis.net/kml/2.2">
             <Document>
                 <name>{doc_name}</name>
-                <gx:AnimatedUpdate>
-                    <gx:duration>0.0</gx:duration>
-                </gx:AnimatedUpdate>
         ''')
         
         kml_footer = textwrap.dedent('''\
@@ -229,12 +223,9 @@ class KMLGenerator(QThread):
         
         kml_header = textwrap.dedent(f'''\
             <?xml version="1.0" encoding="UTF-8"?>
-            <kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2">
+            <kml xmlns="http://www.opengis.net/kml/2.2">
             <Document>
                 <name>{doc_name}</name>
-                <gx:AnimatedUpdate>
-                    <gx:duration>0.0</gx:duration>
-                </gx:AnimatedUpdate>
         ''')
         
         kml_footer = textwrap.dedent('''\
@@ -571,11 +562,11 @@ class KMLGenerator(QThread):
         end_timestamp = self.calculate_end_timestamp(kml_timestamp, duration_minutes)
         
         if end_timestamp:
-            # Use gx:TimeSpan with both begin and end for duration-based visibility
-            return f"{indent}<gx:TimeSpan><begin>{kml_timestamp}</begin><end>{end_timestamp}</end></gx:TimeSpan>\n"
+            # Use TimeSpan with both begin and end for duration-based visibility
+            return f"{indent}<TimeSpan><begin>{kml_timestamp}</begin><end>{end_timestamp}</end></TimeSpan>\n"
         else:
             # Fallback to begin-only if end calculation fails
-            return f"{indent}<gx:TimeSpan><begin>{kml_timestamp}</begin></gx:TimeSpan>\n"
+            return f"{indent}<TimeSpan><begin>{kml_timestamp}</begin></TimeSpan>\n"
     
     def create_sector_placemark(self, lat, lon, azimuth, timestamp):
         """Create a sector wedge placemark with extended directional lines (SWGDE style)"""
@@ -798,7 +789,7 @@ class KMLGenerator(QThread):
         leg_length = self.settings.get('leg_length', 3.0)
         shaded_area_length = self.settings.get('shaded_area_length', 1.0)
         band_thickness_before = self.settings.get('band_thickness_before', 0.0)
-        band_thickness = self.settings.get('band_thickness', 78.0)
+        band_thickness = self.settings.get('band_thickness', 0.0)
         band_units = self.settings.get('band_thickness_units', 'Meters')
         band_thickness_before_miles = self.convert_ta_distance_to_miles(band_thickness_before, band_units)
         band_thickness_miles = self.convert_ta_distance_to_miles(band_thickness, band_units)
@@ -946,7 +937,7 @@ class KMLGenerator(QThread):
     def create_sector_distance_band(self, lat, lon, timestamp, distance_miles, start_angle, end_angle):
         """Create a band polygon constrained to a sector wedge (for Case 1: azimuth + distance)"""
         band_thickness_before = self.settings.get('band_thickness_before', 0.0)
-        band_thickness = self.settings.get('band_thickness', 78.0)
+        band_thickness = self.settings.get('band_thickness', 0.0)
         band_units = self.settings.get('band_thickness_units', 'Meters')
         band_color_raw = self.settings.get('band_color', 'ff0099ff')
         # Apply same 7d transparency as wedge shading (strip existing alpha, add 7d)
@@ -1046,8 +1037,10 @@ class KMLGenerator(QThread):
     
     def create_distance_band(self, lat, lon, timestamp, distance_miles):
         """Create a band polygon at the distance from tower (inner arc + outer arc + edges)"""
+        kml_timestamp, display_label = self.parse_timestamp_to_kml(timestamp)
+        
         band_thickness_before = self.settings.get('band_thickness_before', 0.0)
-        band_thickness = self.settings.get('band_thickness', 78.0)
+        band_thickness = self.settings.get('band_thickness', 0.0)
         band_units = self.settings.get('band_thickness_units', 'Meters')
         band_color_raw = self.settings.get('band_color', 'ff0099ff')
         # Apply same 7d transparency as wedge shading (strip existing alpha, add 7d)
@@ -1081,28 +1074,31 @@ class KMLGenerator(QThread):
         band_coords = inner_coords + list(reversed(outer_coords)) + [inner_coords[0]]
         coordinates_string = ' '.join(band_coords)
         
-        # Determine folder timestamp label
-        if isinstance(timestamp, tuple):
-            if timestamp[0]:  # If valid timestamp
-                timestamp_label = timestamp[1]
-            else:
-                timestamp_label = "Invalid Timestamp"
-        else:
-            timestamp_label = str(timestamp)
-        
         # Create descriptive label showing the band range
         if band_thickness_before_miles > 0:
             band_label = f"Band {inner_distance_miles:.2f}mi to {outer_distance_miles:.2f}mi"
         else:
             band_label = f"Band {distance_miles:.2f}mi ± {band_thickness_miles:.2f}mi"
         
-        placemark = textwrap.dedent(f'''
+        placemark = textwrap.dedent(f'''\
             <Folder>
                 <name>{band_label}</name>
-                <description>Distance band from tower - {timestamp_label}</description>
+                <description>Distance band from tower - {display_label}</description>
                 <visibility>0</visibility>
+        ''')
+        
+        # Add time element on the folder
+        placemark += self.create_time_element(kml_timestamp)
+        
+        # Band polygon placemark
+        placemark += textwrap.dedent(f'''\
                 <Placemark>
                     <name>Band Polygon</name>
+        ''')
+        
+        placemark += self.create_time_element(kml_timestamp, "            ")
+        
+        placemark += textwrap.dedent(f'''\
                     <Style>
                         <PolyStyle>
                             <color>{band_color}</color>
@@ -1120,8 +1116,17 @@ class KMLGenerator(QThread):
                         </outerBoundaryIs>
                     </Polygon>
                 </Placemark>
+        ''')
+        
+        # Reported distance line placemark
+        placemark += textwrap.dedent(f'''\
                 <Placemark>
                     <name>Reported Distance ({distance_miles:.2f} mi)</name>
+        ''')
+        
+        placemark += self.create_time_element(kml_timestamp, "            ")
+        
+        placemark += textwrap.dedent(f'''\
                     <Style>
                         <LineStyle>
                             <color>ff000000</color>
@@ -1134,8 +1139,17 @@ class KMLGenerator(QThread):
                         </coordinates>
                     </LineString>
                 </Placemark>
+        ''')
+        
+        # Center point placemark
+        placemark += textwrap.dedent(f'''\
                 <Placemark>
                     <name>Center</name>
+        ''')
+        
+        placemark += self.create_time_element(kml_timestamp, "            ")
+        
+        placemark += textwrap.dedent(f'''\
                     <Style>
                         <IconStyle>
                             <Icon>
