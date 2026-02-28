@@ -14,19 +14,21 @@ A standalone desktop application for **quick triage and initial visualization** 
 ### 🎯 **Data Type Support**
 
 - **Tower/Sector Data**: Creates directional wedges with azimuth (does not depict coverage)
-- **Distance from Tower Data**: Generates distance-based arcs from tower
+- **Distance from Tower Data**: Generates distance-based band visualization with configurable inner/outer band thickness
 - **Location Point Data**: Displays points with accuracy radius circles
 
 ### 🎨 **Customizable Visualization**
 
-- Adjustable sector width
+- Adjustable sector width, leg length, and shaded area length
+- Configurable distance band (inner/outer) for Distance from Tower data
 - Color-coded data types with customizable colors
+- Configurable unit support (Meters, Feet, Miles, Kilometers)
 - Time animation support for chronological display
 
 ### 🖥️ **User-Friendly Interface**
 
 - Drag-and-drop file input
-- Built-in sample templates for proper formatting
+- Built-in sample XLSX templates for proper formatting
 
 ## Application Screenshot
 
@@ -42,7 +44,7 @@ A standalone desktop application for **quick triage and initial visualization** 
 4. The program will automatically recognize the data type based on the column headers in your input file.
 5. Adjust any visualization settings as needed and (optionally) add a label to describe the data.
 6. Click Generate to create a KML file.
-7. Open the KML file in Google Earth, Google Earth Pro, or other GIS software to view your data.
+7. Open the KML file in **Google Earth Pro** (recommended — supports timeline playback, works offline if map areas were previously loaded), Google Earth Web, Google My Maps, or other GIS software.
 
 ### Data Format Reference
 
@@ -72,13 +74,6 @@ The application supports **18+ timestamp formats**, including:
 
 **Note:** Data sets with missing azimuth, distance, or accuracy values will still process. The visualizations will reflect only the data provided, and alert messages will notify you of any missing fields.
 
-### Viewing in Google Earth
-
-1. Open Google Earth Pro or Google Earth Web
-2. Import the generated KML file (File → Import or drag-and-drop)
-3. Use Google Earth's timeline controls for chronological playback
-4. Zoom, pan, and explore the visualized location data
-5. Google Earth Pro can be used offline to view your KML file, as long as the map areas have been previously loaded while connected to the internet
 
 ---
 
@@ -122,22 +117,29 @@ Download the standalone executable `OS-LocationDataVisualizer.exe` - no Python i
    ```
 2. Build the executable:
    ```bash
+   # Option 1: Use the spec file (recommended)
+   pyinstaller app.spec
+
+   # Option 2: Full command-line
    pyinstaller --onefile --windowed --name "OS-LocationDataVisualizer" --icon=wifi_icon.ico --exclude-module=matplotlib --exclude-module=scipy --exclude-module=numba --noupx app.py
    ```
 3. Find the executable in the `dist/` directory (the file will be named `OS-LocationDataVisualizer.exe`)
 
+## Privacy & Security
+
+This tool runs completely offline and never connects to the internet. All data remains on your local machine.
+
 ## Important Disclaimers
 
-⚠️ **All outputs require verification**
-
-- **This tool is designed for quick preliminary review and visualization**
+- **This tool is in continuous development and may contain errors.**
+- **This tool is designed for quick preliminary review and visualization. All outputs require verification.**
 - **NO COVERAGE ESTIMATIONS**: All shaded areas, wedges, and circles are visual representations only - NOT coverage depictions
 - Distance from tower measurements, sector areas, and location accuracy should all be independently validated
 - This tool does not replace professional forensic analysis or expert work
 
 ## Sample Data Templates
 
-The application includes built-in templates for each data type. Click the "📁 Templates" button in the application to download properly formatted CSV files with sample data and correct column headers.
+The application includes built-in templates for each data type. Click the "📁 Templates" button in the application to download properly formatted XLSX files with sample data and correct column headers.
 
 ---
 ## License
@@ -150,5 +152,5 @@ This program is distributed in the hope that it will be useful, but WITHOUT ANY 
 
 ---
 Copyright (c) 2025 CrimLawTech LLC
-**Version 1.0**  
-_Open Source Location Data Visualization Tool_ 
+**Version 1.1**  
+_Open Source Location Data Visualization Tool_

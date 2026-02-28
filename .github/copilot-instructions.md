@@ -7,7 +7,7 @@ Desktop triage tool for converting CSV/Excel location data into Google Earth KML
 
 **Entry Points & Threading:**
 - `app.py`: Creates Qt application, sets Windows taskbar identity (`SetCurrentProcessExplicitAppUserModelID`), creates MainWindow, shows disclaimer
-- `main_window.py` (1003 lines): Central GUI hub managing all UI state, settings persistence, file validation, thread orchestration
+- `main_window.py` (~1160 lines): Central GUI hub managing all UI state, settings persistence, file validation, thread orchestration
 - `kml_generator.py` (QThread subclass): Background worker thread for KML generation—never blocks UI; emits `progress`, `finished`, `error`, `status_message` signals
 
 **UI & Input:**
@@ -19,13 +19,14 @@ Desktop triage tool for converting CSV/Excel location data into Google Earth KML
 1. **File Input** → `handle_file_selection(file_path)`: Loads CSV (pandas) or Excel (openpyxl), reads first row to detect data type
 2. **Type Detection** → Column header matching with case-insensitive, flexible name aliases:
    - **Tower/Sector**: Has Latitude, Longitude, Timestamp, Azimuth (NO Distance) → creates sector wedges
-   - **Distance from Tower**: Has Latitude, Longitude, Timestamp, Azimuth, Distance → creates sector + distance arc
+   - **Distance from Tower**: Has Latitude, Longitude, Timestamp, Azimuth, Distance → creates sector + distance band
    - **Location Point**: Has Latitude, Longitude, Timestamp, optionally Accuracy → creates accuracy circles
 3. **Validation** → Button disabled if type unclear; shows status messages with emoji indicators (✅, ⚠️, ❌, 📊, 📄)
 4. **KML Generation** → Threaded via `KMLGenerator.run()`:
-   - Calls type-specific generator (`generate_cell_tower_kml()`, `generate_timing_advance_kml()`, `generate_gps_kml()`)
+   - Calls type-specific generator (`generate_cell_tower_kml()`, `generate_distance_from_tower_kml()`, `generate_gps_kml()`)
    - Converts lat/lon to KML (6 decimal places), calculates geographic points via `destination_point()`
-   - Wraps visualizations in timestamped folders with optional time animation (`<gx:TimeSpan>`)
+   - Wraps visualizations in timestamped folders with time animation (`<TimeSpan>`)
+   - Custom labels XML-escaped via `xml.sax.saxutils.escape()` before insertion into KML
 5. **Output** → KML string written to file via `on_generation_finished()`; launches Google Earth with result
 
 ## Project-Specific Patterns
@@ -44,7 +45,8 @@ Desktop triage tool for converting CSV/Excel location data into Google Earth KML
 ### Settings Persistence & State
 - Settings stored in `QSettings("OpenSource", "LocationDataVisualizer")`
 - Configurable per-session: leg length (0.5–20 mi), sector width (30–360°), shaded area length (0.1–10 mi), default accuracy, colors, time animation duration
-- Custom KML label field (`custom_label_input`) for user-provided document names
+- Distance band settings: inner/outer thickness (default 0), configurable units (Meters/Feet/Miles/Kilometers), band color
+- Custom KML label field (`custom_label_input`) for user-provided document names; XML-escaped for KML, sanitized for filenames
 
 ### Status Console & User Feedback
 - Use `add_status_message(msg)` for all user-visible feedback (errors, warnings, progress)
@@ -105,8 +107,9 @@ Desktop triage tool for converting CSV/Excel location data into Google Earth KML
 
 # Distance from Tower: Tower/Sector columns PLUS Distance
 #   + ['Distance'|'range'|'distance (m)'|'distance (meters)']
-#   Generates: Sector + distance arc (combines visualization)
-#   Can handle missing azimuth (→ 360° circle) or missing distance (→ wedge only)
+#   Generates: Sector + distance band with configurable inner/outer thickness
+#   Can handle missing azimuth (→ 360° band) or missing distance (→ wedge only)
+#   Band always includes black "Reported Distance" center line at exact distance
 
 # Location Point: Minimal required
 #   ['Latitude'|'lat', 'Longitude'|'lon'|'long', 'Timestamp'|'Time'|'DateTime']
@@ -133,7 +136,7 @@ pyinstaller --onefile --windowed --name "OS-LocationDataVisualizer" --icon=wifi_
 Output: `dist/OS-LocationDataVisualizer.exe` (self-contained, ~50MB)
 
 **Testing:**
-- Use `download_template()` method to generate sample CSV files with proper headers
+- Use `download_template()` method to generate sample XLSX files with proper headers and pre-formatted columns
 - Create test files with missing columns/rows to validate error handling
 - Verify status messages appear for each edge case (missing azimuth, distance, accuracy)
 - Test timestamp parsing with samples from README (ISO, US, European formats)
@@ -141,19 +144,20 @@ Output: `dist/OS-LocationDataVisualizer.exe` (self-contained, ~50MB)
 ## Integration Points
 
 **KML Structure:**
-- Root: `<Document>` with `<gx:AnimatedUpdate>` for time layer support
+- Root: `<Document>` with standard KML 2.2 namespace (no `gx:` extensions)
 - Folders group related placemarks (each timestamp/entry is a folder with circle/wedge + label placemark)
 - Coordinate format: `lon,lat,0` (6 decimal places ≈ 0.1m precision)
-- Colors: AABBGGRR format (alpha, then BGR); transparency via `4d` prefix (opacity ≈ 30%)
-- Time animation: `<gx:TimeSpan><begin>2025-01-15T14:30:00Z</begin><end>2025-01-15T15:00:00Z</end></gx:TimeSpan>`
+- Colors: AABBGGRR format (alpha, then BGR); transparency via `7d` prefix for shading, `4d` for GPS circles
+- Time animation: `<TimeSpan><begin>2025-01-15T14:30:00Z</begin><end>2025-01-15T15:00:00Z</end></TimeSpan>`
+- Band polygons use `<outline>0</outline>` to prevent outline doubling the fill color
 
 **Windows Integration:**
-- Taskbar grouping: `SetCurrentProcessExplicitAppUserModelID('opensource.locationvisualizer.1.0')`
+- Taskbar grouping: `SetCurrentProcessExplicitAppUserModelID('opensource.locationvisualizer.1.1')`
 - Explorer integration: `subprocess.Popen(['explorer', '/select,', file_path])`
 
 **User Workflows:**
-1. Click 📁 Templates → select Tower/Sector/Distance/Location Point → CSV file downloads
-2. User edits CSV with their data
+1. Click 📁 Templates → select Tower/Sector/Distance/Location Point → XLSX file downloads
+2. User edits XLSX with their data
 3. Drag-drop or Browse → app auto-detects type → shows in status console
 4. Adjust visualization settings (colors, sector width, leg length) in tabs
 5. Click "Generate KML File" → progress bar, background thread → save dialog → opens in Google Earth
@@ -172,4 +176,4 @@ Output: `dist/OS-LocationDataVisualizer.exe` (self-contained, ~50MB)
 
 ---
 
-**Last Updated:** November 2025 | Based on v1.0 codebase analysis
+**Last Updated:** February 2026 | Based on v1.1 codebase analysis

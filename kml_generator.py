@@ -9,6 +9,7 @@ import textwrap
 import re
 from datetime import datetime, timedelta
 from pathlib import Path
+from xml.sax.saxutils import escape as xml_escape
 from PyQt6.QtCore import QThread, pyqtSignal
 
 
@@ -45,7 +46,7 @@ class KMLGenerator(QThread):
             if self.data_type == "Tower/Sector":
                 kml_content = self.generate_cell_tower_kml(df)
             elif self.data_type == "Distance from Tower":
-                kml_content = self.generate_timing_advance_kml(df)
+                kml_content = self.generate_distance_from_tower_kml(df)
             elif self.data_type == "Location Point":
                 kml_content = self.generate_gps_kml(df)
             else:
@@ -73,20 +74,31 @@ class KMLGenerator(QThread):
         lon2 = lon1 + math.atan2(math.sin(azimuth) * math.sin(d_div_r) * math.cos(lat1),
                                  math.cos(d_div_r) - math.sin(lat1) * math.sin(lat2))
         return math.degrees(lat2), math.degrees(lon2)
+
+    def calculate_sector_area_sq_miles(self, radius_miles, sector_width_degrees):
+        """Calculate sector area in square miles."""
+        radius = max(float(radius_miles), 0.0)
+        sector_width = max(float(sector_width_degrees), 0.0)
+        return (sector_width / 360.0) * math.pi * (radius ** 2)
+
+    def calculate_band_area_sq_miles(self, center_distance_miles, sector_width_degrees, band_before_miles, band_after_miles):
+        """Calculate sector band area in square miles."""
+        sector_width = max(float(sector_width_degrees), 0.0)
+        center_distance = max(float(center_distance_miles), 0.0)
+        inner_radius = max(center_distance - max(float(band_before_miles), 0.0), 0.0)
+        outer_radius = max(center_distance + max(float(band_after_miles), 0.0), inner_radius)
+        return (sector_width / 360.0) * math.pi * ((outer_radius ** 2) - (inner_radius ** 2))
     
     def generate_cell_tower_kml(self, df):
         """Generate KML for tower/sector data"""
         # Use custom label if provided, otherwise default
-        doc_name = self.settings.get('custom_label') or "Tower/Sector Data"
+        doc_name = xml_escape(self.settings.get('custom_label') or "Tower/Sector Data")
         
         kml_header = textwrap.dedent(f'''\
             <?xml version="1.0" encoding="UTF-8"?>
-            <kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2">
+            <kml xmlns="http://www.opengis.net/kml/2.2">
             <Document>
                 <name>{doc_name}</name>
-                <gx:AnimatedUpdate>
-                    <gx:duration>0.0</gx:duration>
-                </gx:AnimatedUpdate>
         ''')
         
         kml_footer = textwrap.dedent('''\
@@ -130,19 +142,16 @@ class KMLGenerator(QThread):
         
         return kml_header + placemarks + kml_footer
     
-    def generate_timing_advance_kml(self, df):
+    def generate_distance_from_tower_kml(self, df):
         """Generate KML for distance from tower data with arc visualization"""
         # Use custom label if provided, otherwise default
-        doc_name = self.settings.get('custom_label') or "Distance from Tower Analysis"
+        doc_name = xml_escape(self.settings.get('custom_label') or "Distance from Tower Analysis")
         
         kml_header = textwrap.dedent(f'''\
             <?xml version="1.0" encoding="UTF-8"?>
-            <kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2">
+            <kml xmlns="http://www.opengis.net/kml/2.2">
             <Document>
                 <name>{doc_name}</name>
-                <gx:AnimatedUpdate>
-                    <gx:duration>0.0</gx:duration>
-                </gx:AnimatedUpdate>
         ''')
         
         kml_footer = textwrap.dedent('''\
@@ -188,10 +197,10 @@ class KMLGenerator(QThread):
                 placemarks += self.create_sector_placemark(lat, lon, azimuth, timestamp)
                 
             elif not has_azimuth and has_distance:
-                # Case 3: Missing azimuth but has distance - create 360° circle at the distance
+                # Case 3: Missing azimuth but has distance - create distance band (donut/pizza-crust visualization)
                 missing_azimuth_count += 1
                 distance_miles = self.convert_ta_distance_to_miles(distance, self.settings.get('ta_distance_units', 'Meters'))
-                placemarks += self.create_distance_circle(lat, lon, timestamp, distance_miles)
+                placemarks += self.create_distance_band(lat, lon, timestamp, distance_miles)
                 
             else:
                 # Case 4: Missing both azimuth and distance - create 360° circle using shaded area length
@@ -210,16 +219,13 @@ class KMLGenerator(QThread):
     def generate_gps_kml(self, df):
         """Generate KML for location point data"""
         # Use custom label if provided, otherwise default
-        doc_name = self.settings.get('custom_label') or "Location Point Data"
+        doc_name = xml_escape(self.settings.get('custom_label') or "Location Point Data")
         
         kml_header = textwrap.dedent(f'''\
             <?xml version="1.0" encoding="UTF-8"?>
-            <kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2">
+            <kml xmlns="http://www.opengis.net/kml/2.2">
             <Document>
                 <name>{doc_name}</name>
-                <gx:AnimatedUpdate>
-                    <gx:duration>0.0</gx:duration>
-                </gx:AnimatedUpdate>
         ''')
         
         kml_footer = textwrap.dedent('''\
@@ -293,6 +299,7 @@ class KMLGenerator(QThread):
         placemark = textwrap.dedent(f'''\
             <Folder>
                 <name>{display_label}</name>
+                <visibility>0</visibility>
         ''')
         
         # Add timestamp if successfully interpreted
@@ -484,6 +491,15 @@ class KMLGenerator(QThread):
                         minute = int(groups[4]) if len(groups) > 4 else 0
                         second = int(groups[5]) if len(groups) > 5 else 0
                         
+                        # Handle AM/PM (check if there's an AM/PM marker in the original string)
+                        ampm_match = re.search(r'\s([APap][Mm])\s*$', timestamp_str_clean)
+                        if ampm_match:
+                            ampm = ampm_match.group(1).lower()
+                            if ampm == 'pm' and hour != 12:
+                                hour += 12
+                            elif ampm == 'am' and hour == 12:
+                                hour = 0
+                        
                         # Create datetime object
                         dt = datetime(year, month, day, hour, minute, second)
                     
@@ -546,11 +562,11 @@ class KMLGenerator(QThread):
         end_timestamp = self.calculate_end_timestamp(kml_timestamp, duration_minutes)
         
         if end_timestamp:
-            # Use gx:TimeSpan with both begin and end for duration-based visibility
-            return f"{indent}<gx:TimeSpan><begin>{kml_timestamp}</begin><end>{end_timestamp}</end></gx:TimeSpan>\n"
+            # Use TimeSpan with both begin and end for duration-based visibility
+            return f"{indent}<TimeSpan><begin>{kml_timestamp}</begin><end>{end_timestamp}</end></TimeSpan>\n"
         else:
             # Fallback to begin-only if end calculation fails
-            return f"{indent}<gx:TimeSpan><begin>{kml_timestamp}</begin></gx:TimeSpan>\n"
+            return f"{indent}<TimeSpan><begin>{kml_timestamp}</begin></TimeSpan>\n"
     
     def create_sector_placemark(self, lat, lon, azimuth, timestamp):
         """Create a sector wedge placemark with extended directional lines (SWGDE style)"""
@@ -563,6 +579,7 @@ class KMLGenerator(QThread):
         placemark = textwrap.dedent(f'''\
             <Folder>
                 <name>{display_label}</name>
+                <visibility>0</visibility>
         ''')
         
         # Add timestamp if successfully interpreted and time animation is enabled
@@ -681,6 +698,7 @@ class KMLGenerator(QThread):
         placemark = textwrap.dedent(f'''\
             <Folder>
                 <name>{display_label}</name>
+                <visibility>0</visibility>
         ''')
         
         # Add timestamp if successfully parsed and time animation is enabled
@@ -739,42 +757,6 @@ class KMLGenerator(QThread):
         
         return placemark
     
-    def create_uncertainty_circle(self, lat, lon, timestamp, radius_miles):
-        """Create uncertainty circle for distance from tower data"""
-        kml_timestamp, display_label = self.parse_timestamp_to_kml(timestamp)
-        
-        placemark = textwrap.dedent(f'''\
-            <Placemark>
-                <name>{display_label} Uncertainty</name>
-        ''')
-        
-        # Add timestamp if successfully interpreted and time animation is enabled
-        placemark += self.create_time_element(kml_timestamp)
-        
-        placemark += textwrap.dedent(f'''\
-                <Style>
-                    <LineStyle><color>{self.settings['ta_color']}</color><width>1</width></LineStyle>
-                    <PolyStyle><color>7d{self.settings['ta_color'][2:]}</color></PolyStyle>
-                </Style>
-                <Polygon>
-                    <outerBoundaryIs><LinearRing><coordinates>
-        ''')
-        
-        # Generate circle points
-        for i in range(37):
-            angle = i * 10
-            arc_lat, arc_lon = self.destination_point(lat, lon, angle, radius_miles)
-            placemark += f"{arc_lon},{arc_lat},0\n"
-        
-        placemark += f"{lon},{lat},0\n"
-        placemark += textwrap.dedent('''\
-                    </coordinates></LinearRing></outerBoundaryIs>
-                </Polygon>
-            </Placemark>
-        ''')
-        
-        return placemark
-    
     def create_pin_placemark(self, lat, lon, name, color):
         """Create a pin placemark"""
         kml_timestamp, display_label = self.parse_timestamp_to_kml(name)
@@ -806,6 +788,17 @@ class KMLGenerator(QThread):
         half_spread = azimuth_spread / 2
         leg_length = self.settings.get('leg_length', 3.0)
         shaded_area_length = self.settings.get('shaded_area_length', 1.0)
+        band_thickness_before = self.settings.get('band_thickness_before', 0.0)
+        band_thickness = self.settings.get('band_thickness', 0.0)
+        band_units = self.settings.get('band_thickness_units', 'Meters')
+        band_thickness_before_miles = self.convert_ta_distance_to_miles(band_thickness_before, band_units)
+        band_thickness_miles = self.convert_ta_distance_to_miles(band_thickness, band_units)
+        band_area_sq_miles = self.calculate_band_area_sq_miles(
+            distance_miles,
+            azimuth_spread,
+            band_thickness_before_miles,
+            band_thickness_miles
+        )
         
         # Calculate start and end angles for the sector
         start_angle = azimuth - half_spread
@@ -815,6 +808,7 @@ class KMLGenerator(QThread):
         placemark = textwrap.dedent(f'''\
             <Folder>
                 <name>{display_label}</name>
+                <visibility>0</visibility>
         ''')
         
         # Add timestamp for time animation
@@ -829,6 +823,9 @@ class KMLGenerator(QThread):
                         Azimuth: {azimuth}°
                         Sector Width: {azimuth_spread}°
                         Distance: {distance_miles:.2f} miles
+                        Band Area (Square Miles): {band_area_sq_miles:.2f}
+                        Band Inner Width: {band_thickness_before} {band_units}
+                        Band Outer Width: {band_thickness} {band_units}
                     </description>
         ''')
         
@@ -906,33 +903,9 @@ class KMLGenerator(QThread):
                 </Placemark>
         ''')
         
-        # 4. Create the distance arc
-        placemark += textwrap.dedent(f'''\
-                <Placemark>
-                    <name>{display_label} Distance Arc ({distance_miles:.2f} mi)</name>
-        ''')
-        
-        placemark += self.create_time_element(kml_timestamp, "            ")
-        
-        placemark += textwrap.dedent(f'''\
-                    <Style>
-                        <LineStyle><color>{self.settings['ta_color']}</color><width>3</width></LineStyle>
-                    </Style>
-                    <LineString>
-                        <coordinates>
-        ''')
-        
-        # Generate arc points for the distance arc
-        for i in range(num_points + 1):
-            angle = start_angle + (i / num_points) * azimuth_spread
-            arc_lat, arc_lon = self.destination_point(lat, lon, angle, distance_miles)
-            placemark += f"                            {arc_lon},{arc_lat},0\n"
-        
-        placemark += textwrap.dedent('''\
-                        </coordinates>
-                    </LineString>
-                </Placemark>
-        ''')
+        # 4. Create the distance band (instead of arc line)
+        band_placemark = self.create_sector_distance_band(lat, lon, timestamp, distance_miles, start_angle, end_angle)
+        placemark += textwrap.indent(band_placemark, "        ")
         
         # 5. Add invisible center point label to show timestamp
         placemark += textwrap.dedent(f'''\
@@ -961,48 +934,217 @@ class KMLGenerator(QThread):
         
         return placemark
     
-    def create_distance_circle(self, lat, lon, timestamp, distance_miles):
-        """Create a circle at the distance from tower (when azimuth is missing)"""
-        kml_timestamp, display_label = self.parse_timestamp_to_kml(timestamp)
+    def create_sector_distance_band(self, lat, lon, timestamp, distance_miles, start_angle, end_angle):
+        """Create a band polygon constrained to a sector wedge (for Case 1: azimuth + distance)"""
+        band_thickness_before = self.settings.get('band_thickness_before', 0.0)
+        band_thickness = self.settings.get('band_thickness', 0.0)
+        band_units = self.settings.get('band_thickness_units', 'Meters')
+        band_color_raw = self.settings.get('band_color', 'ff0099ff')
+        # Apply same 7d transparency as wedge shading (strip existing alpha, add 7d)
+        band_color = f"7d{band_color_raw[2:]}"
         
-        # Create folder to group circle and center label
-        placemark = textwrap.dedent(f'''\
-            <Folder>
-                <name>{display_label} Distance Circle</name>
+        # Convert band thicknesses to miles
+        band_thickness_before_miles = self.convert_ta_distance_to_miles(band_thickness_before, band_units)
+        band_thickness_miles = self.convert_ta_distance_to_miles(band_thickness, band_units)
+        
+        # Calculate inner and outer distances
+        inner_distance_miles = distance_miles - band_thickness_before_miles
+        outer_distance_miles = distance_miles + band_thickness_miles
+        
+        # Create inner and outer arc coordinates for the sector band
+        inner_coords = []
+        outer_coords = []
+        
+        # Get settings for calculation
+        num_points = self.settings.get('num_points', 20)
+        
+        # Generate points along the sector (from start_angle to end_angle)
+        for i in range(num_points + 1):
+            angle = start_angle + (i / num_points) * (end_angle - start_angle)
+            inner_point = self.destination_point(lat, lon, angle, inner_distance_miles)
+            outer_point = self.destination_point(lat, lon, angle, outer_distance_miles)
+            inner_coords.append(f"{inner_point[1]:.6f},{inner_point[0]:.6f},0")
+            outer_coords.append(f"{outer_point[1]:.6f},{outer_point[0]:.6f},0")
+        
+        # Create the sector band polygon: inner arc + outer arc (reverse) + closing edges
+        # Order: start on inner arc, go to end, then outer arc back to start
+        band_coords = inner_coords + list(reversed(outer_coords)) + [inner_coords[0]]
+        coordinates_string = ' '.join(band_coords)
+        
+        # Determine folder timestamp label
+        if isinstance(timestamp, tuple):
+            if timestamp[0]:  # If valid timestamp
+                timestamp_label = timestamp[1]
+            else:
+                timestamp_label = "Invalid Timestamp"
+        else:
+            timestamp_label = str(timestamp)
+        
+        # Create descriptive label showing the band range
+        if band_thickness_before_miles > 0:
+            band_label = f"Distance Band ({distance_miles - band_thickness_before_miles:.2f}mi to {distance_miles + band_thickness_miles:.2f}mi)"
+        else:
+            band_label = f"Distance Band ({distance_miles:.2f}mi ± {band_thickness_miles:.2f}mi)"
+        
+        placemark = textwrap.dedent(f'''
+            <Placemark>
+                <name>{band_label}</name>
+                <Style>
+                    <PolyStyle>
+                        <color>{band_color}</color>
+                        <fill>1</fill>
+                        <outline>0</outline>
+                    </PolyStyle>
+                </Style>
+                <Polygon>
+                    <outerBoundaryIs>
+                        <LinearRing>
+                            <coordinates>
+{textwrap.indent(coordinates_string, " " * 32)}
+                            </coordinates>
+                        </LinearRing>
+                    </outerBoundaryIs>
+                </Polygon>
+            </Placemark>
         ''')
         
-        # Add timestamp if successfully interpreted and time animation is enabled
+        # Add a black line at the exact reported distance
+        reported_coords = []
+        for i in range(num_points + 1):
+            angle = start_angle + (i / num_points) * (end_angle - start_angle)
+            rpt = self.destination_point(lat, lon, angle, distance_miles)
+            reported_coords.append(f"{rpt[1]:.6f},{rpt[0]:.6f},0")
+        reported_coords_string = ' '.join(reported_coords)
+        
+        placemark += textwrap.dedent(f'''
+            <Placemark>
+                <name>Reported Distance ({distance_miles:.2f} mi)</name>
+                <Style>
+                    <LineStyle>
+                        <color>ff000000</color>
+                        <width>2</width>
+                    </LineStyle>
+                </Style>
+                <LineString>
+                    <coordinates>
+{textwrap.indent(reported_coords_string, " " * 24)}
+                    </coordinates>
+                </LineString>
+            </Placemark>
+        ''')
+        
+        return placemark
+    
+    def create_distance_band(self, lat, lon, timestamp, distance_miles):
+        """Create a band polygon at the distance from tower (inner arc + outer arc + edges)"""
+        kml_timestamp, display_label = self.parse_timestamp_to_kml(timestamp)
+        
+        band_thickness_before = self.settings.get('band_thickness_before', 0.0)
+        band_thickness = self.settings.get('band_thickness', 0.0)
+        band_units = self.settings.get('band_thickness_units', 'Meters')
+        band_color_raw = self.settings.get('band_color', 'ff0099ff')
+        # Apply same 7d transparency as wedge shading (strip existing alpha, add 7d)
+        band_color = f"7d{band_color_raw[2:]}"
+        
+        # Convert band thicknesses to miles
+        band_thickness_before_miles = self.convert_ta_distance_to_miles(band_thickness_before, band_units)
+        band_thickness_miles = self.convert_ta_distance_to_miles(band_thickness, band_units)
+        
+        # Calculate inner and outer distances
+        inner_distance_miles = distance_miles - band_thickness_before_miles
+        outer_distance_miles = distance_miles + band_thickness_miles
+        
+        # Create inner and outer arc coordinates for the band
+        inner_coords = []
+        outer_coords = []
+        
+        # Generate 37 points around the circle (every 10 degrees, 0-360)
+        reported_coords = []
+        for bearing in range(0, 361, 10):
+            inner_point = self.destination_point(lat, lon, bearing, inner_distance_miles)
+            outer_point = self.destination_point(lat, lon, bearing, outer_distance_miles)
+            reported_point = self.destination_point(lat, lon, bearing, distance_miles)
+            inner_coords.append(f"{inner_point[1]:.6f},{inner_point[0]:.6f},0")
+            outer_coords.append(f"{outer_point[1]:.6f},{outer_point[0]:.6f},0")
+            reported_coords.append(f"{reported_point[1]:.6f},{reported_point[0]:.6f},0")
+        reported_coords_string = ' '.join(reported_coords)
+        
+        # Create the band polygon: inner arc + outer arc (reverse) + closing point
+        # The ring must close, so we go: inner_start -> inner_end -> outer_end -> outer_start -> inner_start
+        band_coords = inner_coords + list(reversed(outer_coords)) + [inner_coords[0]]
+        coordinates_string = ' '.join(band_coords)
+        
+        # Create descriptive label showing the band range
+        if band_thickness_before_miles > 0:
+            band_label = f"Band {inner_distance_miles:.2f}mi to {outer_distance_miles:.2f}mi"
+        else:
+            band_label = f"Band {distance_miles:.2f}mi ± {band_thickness_miles:.2f}mi"
+        
+        placemark = textwrap.dedent(f'''\
+            <Folder>
+                <name>{band_label}</name>
+                <description>Distance band from tower - {display_label}</description>
+                <visibility>0</visibility>
+        ''')
+        
+        # Add time element on the folder
         placemark += self.create_time_element(kml_timestamp)
         
-        # Create the circle at the distance
+        # Band polygon placemark
         placemark += textwrap.dedent(f'''\
                 <Placemark>
-                    <name>{display_label} Distance Circle ({distance_miles:.2f} mi)</name>
+                    <name>Band Polygon</name>
         ''')
         
         placemark += self.create_time_element(kml_timestamp, "            ")
         
         placemark += textwrap.dedent(f'''\
                     <Style>
-                        <LineStyle><color>{self.settings['ta_color']}</color><width>3</width></LineStyle>
+                        <PolyStyle>
+                            <color>{band_color}</color>
+                            <fill>1</fill>
+                            <outline>0</outline>
+                        </PolyStyle>
+                    </Style>
+                    <Polygon>
+                        <outerBoundaryIs>
+                            <LinearRing>
+                                <coordinates>
+{textwrap.indent(coordinates_string, " " * 32)}
+                                </coordinates>
+                            </LinearRing>
+                        </outerBoundaryIs>
+                    </Polygon>
+                </Placemark>
+        ''')
+        
+        # Reported distance line placemark
+        placemark += textwrap.dedent(f'''\
+                <Placemark>
+                    <name>Reported Distance ({distance_miles:.2f} mi)</name>
+        ''')
+        
+        placemark += self.create_time_element(kml_timestamp, "            ")
+        
+        placemark += textwrap.dedent(f'''\
+                    <Style>
+                        <LineStyle>
+                            <color>ff000000</color>
+                            <width>2</width>
+                        </LineStyle>
                     </Style>
                     <LineString>
                         <coordinates>
-        ''')
-        
-        # Generate circle points at the distance
-        for i in range(37):  # 0 to 360 degrees, every 10 degrees
-            angle = i * 10
-            arc_lat, arc_lon = self.destination_point(lat, lon, angle, distance_miles)
-            placemark += f"                            {arc_lon},{arc_lat},0\n"
-        
-        placemark += textwrap.dedent(f'''\
+{textwrap.indent(reported_coords_string, ' ' * 28)}
                         </coordinates>
                     </LineString>
                 </Placemark>
+        ''')
         
+        # Center point placemark
+        placemark += textwrap.dedent(f'''\
                 <Placemark>
-                    <name>{display_label}</name>
+                    <name>Center</name>
         ''')
         
         placemark += self.create_time_element(kml_timestamp, "            ")
@@ -1010,15 +1152,14 @@ class KMLGenerator(QThread):
         placemark += textwrap.dedent(f'''\
                     <Style>
                         <IconStyle>
-                            <scale>0</scale>
+                            <Icon>
+                                <href>http://maps.google.com/mapfiles/kml/pushpin/wht-pushpin.png</href>
+                            </Icon>
+                            <color>ff0000ff</color>
                         </IconStyle>
-                        <LabelStyle>
-                            <color>ffffffff</color>
-                            <scale>0.8</scale>
-                        </LabelStyle>
                     </Style>
                     <Point>
-                        <coordinates>{lon},{lat},0</coordinates>
+                        <coordinates>{lon:.6f},{lat:.6f},0</coordinates>
                     </Point>
                 </Placemark>
             </Folder>

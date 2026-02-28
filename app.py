@@ -14,7 +14,7 @@ def main():
     
     # Set application properties
     app.setApplicationName("Open Source Location Data Visualizer")
-    app.setApplicationVersion("1.0")
+    app.setApplicationVersion("1.1")
     app.setOrganizationName("OpenSource")
     
     # Create and show main window
@@ -28,7 +28,7 @@ def main():
     if os.name == 'nt':  # Windows
         try:
             import ctypes
-            myappid = 'opensource.locationvisualizer.1.0'
+            myappid = 'opensource.locationvisualizer.1.1'
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
         except:
             pass

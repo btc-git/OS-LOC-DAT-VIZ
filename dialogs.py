@@ -70,20 +70,20 @@ class DisclaimerDialog(QDialog):
 </ul>
 
 <h3 style='color: #00b894; margin-top: 25px;'>📝 Usage Overview</h3>
-<ul>
+<ol>
     <li>Download a <strong>template file</strong> using the Templates button in the main window.</li>
     <li>Copy and paste your data from your records into the matching columns in the template file and save it as your <strong>input file</strong>.</li>
     <li>Drag and drop your input file into the program, or use the <strong>Browse for File</strong> button.</li>
     <li>The program will automatically recognize the data type based on the column headers in your input file.</li>
     <li>Adjust any visualization settings as needed and (optionally) add a label to describe the data.</li>
     <li>Click <strong>Generate</strong> to create a KML file.</li>
-    <li>Open the KML file in Google Earth, Google Earth Pro, or other GIS software to view your data.</li>
-</ul>
+    <li>Open the KML file in <strong>Google Earth Pro</strong> (recommended — supports timeline playback, works offline if map areas were previously loaded), Google Earth Web, Google My Maps, or other GIS software.</li>
+</ol>
 
 <h3 style='color: #3dc1d3; margin-top: 25px;'>🎨 Visualization Details</h3>
 <ul>
     <li>If your data includes tower and sector information, the tool will draw a wedge shape to show the general direction. If no azimuth is provided, it will draw a circle. The default wedge is set to a 120° angle and a 1 mile shaded area, but this is for visualization only and does not reflect coverage.</li>
-    <li>If your data includes a distance from the tower, the tool will draw an arc at that distance. This is a visual aid and not a precise measurement and does not indicate the device was at that exact distance.</li>
+    <li>If your data includes a distance from the tower, the tool will draw a band at that distance with configurable inner and outer thickness. This is a visual aid and not a precise measurement and does not indicate the device was at that exact distance.</li>
     <li>For location point data, the tool will draw a circle to represent the point and its accuracy, using either the provided accuracy or a default value of 100 meters.</li>
 </ul>
 
@@ -100,7 +100,7 @@ class DisclaimerDialog(QDialog):
             <li><strong>Advanced:</strong> Excel serial dates (45696.7637037037), timestamps with timezone (EST, GMT, UTC auto-stripped), milliseconds auto-handled</li>
         </ul>
     </li>
-    <li>Distances from the tower are provided in miles. Azimuth in degrees (0°=N, 90°=E, 180°=S, 270°=W). Coordinates in decimal degrees (e.g., 40.724756, -74.222508).</li>
+    <li>Distances and accuracy values can be provided in configurable units (Meters, Feet, Miles, or Kilometers). Azimuth in degrees (0°=N, 90°=E, 180°=S, 270°=W). Coordinates in decimal degrees (e.g., 40.724756, -74.222508).</li>
     <li><strong>Google Earth Pro:</strong> Import generated KML files into Google Earth or compatible GIS software. Use the time slider in Google Earth Pro to view data over time.</li>
 </ul>
 
@@ -117,7 +117,7 @@ class DisclaimerDialog(QDialog):
 </ul>
 
 <p style='text-align: center; margin-top: 30px; color: #666666; font-style: italic;'>
-Version 1.0<br/>
+Version 1.1<br/>
 Open Source Location Data Visualization Tool<br/>
 <br/>
 <strong>📜 Open Source License:</strong> <a href="license://show" style="color:#4ecdc4; text-decoration:underline; cursor:pointer;">LICENSE</a> (GNU GPL v3.0)<br/>

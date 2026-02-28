@@ -7,11 +7,13 @@ import pandas as pd
 import subprocess
 import sys
 from pathlib import Path
+from openpyxl import Workbook
+from openpyxl.styles import Font, numbers
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QGridLayout, QPushButton, QLabel, QFileDialog, 
                              QSpinBox, QDoubleSpinBox, QRadioButton, QButtonGroup, 
                              QTextEdit, QGroupBox, QColorDialog, QProgressBar, 
-                             QMessageBox, QTabWidget, QCheckBox, QMenu, QComboBox, QLineEdit)
+                             QMessageBox, QTabWidget, QCheckBox, QMenu, QComboBox, QLineEdit, QFrame, QScrollArea)
 from PyQt6.QtCore import Qt, QSettings
 from PyQt6.QtGui import QFont, QColor, QIcon, QPixmap, QPainter, QPen
 
@@ -24,7 +26,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Open Source Location Data Visualizer")
-        self.setGeometry(100, 100, 600, 820)  # Increased from 780 to 820 for more comfortable spacing
+        self.setGeometry(100, 100, 600, 800)  # Increased height to give Settings pane more space
         
         # Set custom window icon
         self.setWindowIcon(self.create_pushpin_icon())
@@ -90,7 +92,7 @@ class MainWindow(QMainWindow):
         # Templates button
         self.template_button = QPushButton("📁 Templates")
         self.template_button.setMaximumWidth(120)
-        self.template_button.setToolTip("Download template CSV files with correct headers for each data type")
+        self.template_button.setToolTip("Download template Excel files with correct headers for each data type")
         self.template_button.clicked.connect(self.show_template_menu)
         self.template_button.setStyleSheet("""
             QPushButton {
@@ -216,7 +218,7 @@ class MainWindow(QMainWindow):
         label_layout.addWidget(custom_label_desc)
         
         self.custom_label_input = QLineEdit()
-        self.custom_label_input.setPlaceholderText("e.g., 'August 1 Warrant - Timing Advance'")
+        self.custom_label_input.setPlaceholderText("e.g., 'August 1 Warrant - Distance from Tower'")
         self.custom_label_input.setMaximumWidth(300)
         self.custom_label_input.setStyleSheet("""
             QLineEdit {
@@ -240,75 +242,181 @@ class MainWindow(QMainWindow):
         # Visualization Settings Tab
         viz_tab = QWidget()
         viz_layout = QGridLayout(viz_tab)
-        viz_layout.setVerticalSpacing(10)
+        viz_layout.setVerticalSpacing(8)  # Compact spacing for Settings controls
+        
+        row = 0
+        
+        # ============ TOWER/SECTOR SETTINGS ============
+        tower_label = QLabel("Tower/Sector Settings")
+        tower_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        tower_label.setStyleSheet("color: #4ecdc4; font-weight: bold; font-size: 14px;")
+        viz_layout.addWidget(tower_label, row, 0, 1, 2)
+        row += 1
         
         # Leg length
         leg_length_label = QLabel("Tower/Sector Leg Length (miles):")
         leg_length_label.setToolTip("Length of the lines extending from the tower")
-        viz_layout.addWidget(leg_length_label, 0, 0)
+        viz_layout.addWidget(leg_length_label, row, 0)
         self.leg_length_spinbox = QDoubleSpinBox()
         self.leg_length_spinbox.setRange(0.5, 20.0)
         self.leg_length_spinbox.setValue(3.0)
         self.leg_length_spinbox.setSingleStep(0.5)
-        viz_layout.addWidget(self.leg_length_spinbox, 0, 1)
+        viz_layout.addWidget(self.leg_length_spinbox, row, 1)
+        row += 1
         
         # Shaded area length
         shaded_area_label = QLabel("Tower/Sector Shaded Area Length (miles):")
         shaded_area_label.setToolTip("Length of the shaded wedge (can be shorter or equal to leg length)")
-        viz_layout.addWidget(shaded_area_label, 1, 0)
+        viz_layout.addWidget(shaded_area_label, row, 0)
         self.shaded_area_spinbox = QDoubleSpinBox()
         self.shaded_area_spinbox.setRange(0.1, 10.0)
         self.shaded_area_spinbox.setValue(1.0)
         self.shaded_area_spinbox.setSingleStep(0.1)
-        viz_layout.addWidget(self.shaded_area_spinbox, 1, 1)
+        viz_layout.addWidget(self.shaded_area_spinbox, row, 1)
+        row += 1
         
         # Shaded area azimuth and width
         azimuth_label = QLabel("Tower/Sector Width (degrees):")
         azimuth_label.setToolTip("Angular width of the tower sector shaded area")
-        viz_layout.addWidget(azimuth_label, 2, 0)
+        viz_layout.addWidget(azimuth_label, row, 0)
         self.azimuth_spinbox = QSpinBox()
         self.azimuth_spinbox.setRange(30, 360)
         self.azimuth_spinbox.setValue(120)
-        viz_layout.addWidget(self.azimuth_spinbox, 2, 1)
+        viz_layout.addWidget(self.azimuth_spinbox, row, 1)
+        row += 1
         
-        # Location Point accuracy units dropdown
-        gps_units_label = QLabel("Location Point Accuracy Units:")
-        gps_units_label.setToolTip("Select the units used for location point accuracy in your data")
-        viz_layout.addWidget(gps_units_label, 3, 0)
-        self.gps_units_combo = QComboBox()
-        self.gps_units_combo.addItems(["Meters", "Feet", "Miles", "Kilometers"])
-        self.gps_units_combo.setCurrentText("Meters")  # Default to meters
-        viz_layout.addWidget(self.gps_units_combo, 3, 1)
+        # Separator
+        separator1 = QFrame()
+        separator1.setFrameShape(QFrame.Shape.HLine)
+        separator1.setFrameShadow(QFrame.Shadow.Sunken)
+        separator1.setStyleSheet("color: #333333;")
+        viz_layout.addWidget(separator1, row, 0, 1, 2)
+        row += 1
         
-        # Default Location Point accuracy for missing data
-        default_accuracy_label = QLabel("Default Location Accuracy:")
-        default_accuracy_label.setToolTip("Default accuracy radius used when input location point data has no accuracy value (uses Location Point Accuracy Units above)")
-        viz_layout.addWidget(default_accuracy_label, 4, 0)
-        self.default_accuracy_spinbox = QSpinBox()
-        self.default_accuracy_spinbox.setRange(1, 10000)
-        self.default_accuracy_spinbox.setValue(100)  # Default 100
-        viz_layout.addWidget(self.default_accuracy_spinbox, 4, 1)
+        # ============ DISTANCE FROM TOWER SETTINGS ============
+        ta_label = QLabel("Distance from Tower Settings")
+        ta_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ta_label.setStyleSheet("color: #4ecdc4; font-weight: bold; font-size: 14px;")
+        viz_layout.addWidget(ta_label, row, 0, 1, 2)
+        row += 1
         
         # Distance from Tower units dropdown
         ta_distance_units_label = QLabel("Distance from Tower Units:")
         ta_distance_units_label.setToolTip("Select the units used for distance from tower in your data")
-        viz_layout.addWidget(ta_distance_units_label, 5, 0)
+        viz_layout.addWidget(ta_distance_units_label, row, 0)
         self.ta_distance_units_combo = QComboBox()
         self.ta_distance_units_combo.addItems(["Meters", "Feet", "Miles", "Kilometers"])
         self.ta_distance_units_combo.setCurrentText("Miles")  # Default to miles for distance from tower
-        viz_layout.addWidget(self.ta_distance_units_combo, 5, 1)
+        viz_layout.addWidget(self.ta_distance_units_combo, row, 1)
+        row += 1
+        
+        # Inside Band Distance (before distance - extends inward from distance point)
+        inside_band_label = QLabel("Band Distance Before (Inner):")
+        inside_band_label.setToolTip("Distance extending inward from the distance value (creates band from distance - this value to distance)")
+        viz_layout.addWidget(inside_band_label, row, 0)
+        self.inside_band_spinbox = QDoubleSpinBox()
+        self.inside_band_spinbox.setRange(0.0, 10000.0)
+        self.inside_band_spinbox.setValue(0.0)  # Default 0 (no inner band)
+        self.inside_band_spinbox.setSingleStep(1.0)
+        viz_layout.addWidget(self.inside_band_spinbox, row, 1)
+        row += 1
+        
+        # Outside Band Distance (after distance - extends outward from distance point)
+        outside_band_label = QLabel("Band Distance After (Outer):")
+        outside_band_label.setToolTip("Distance extending outward from the distance value (creates band from distance to distance + this value)")
+        viz_layout.addWidget(outside_band_label, row, 0)
+        self.band_thickness_spinbox = QDoubleSpinBox()
+        self.band_thickness_spinbox.setRange(0.0, 10000.0)
+        self.band_thickness_spinbox.setValue(0.0)  # Default 0 meters
+        self.band_thickness_spinbox.setSingleStep(1.0)
+        viz_layout.addWidget(self.band_thickness_spinbox, row, 1)
+        row += 1
+        
+        # Band Distance Units dropdown
+        band_units_label = QLabel("Band Distance Units:")
+        band_units_label.setToolTip("Units for both inner and outer band distances")
+        viz_layout.addWidget(band_units_label, row, 0)
+        self.band_thickness_units_combo = QComboBox()
+        self.band_thickness_units_combo.addItems(["Meters", "Miles"])
+        self.band_thickness_units_combo.setCurrentText("Meters")  # Default to meters
+        viz_layout.addWidget(self.band_thickness_units_combo, row, 1)
+        row += 1
+        
+        # Separator
+        separator2 = QFrame()
+        separator2.setFrameShape(QFrame.Shape.HLine)
+        separator2.setFrameShadow(QFrame.Shadow.Sunken)
+        separator2.setStyleSheet("color: #333333;")
+        viz_layout.addWidget(separator2, row, 0, 1, 2)
+        row += 1
+        
+        # ============ LOCATION POINT SETTINGS ============
+        gps_label = QLabel("Location Point Settings")
+        gps_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        gps_label.setStyleSheet("color: #4ecdc4; font-weight: bold; font-size: 14px;")
+        viz_layout.addWidget(gps_label, row, 0, 1, 2)
+        row += 1
+        
+        # Location Point accuracy units dropdown
+        gps_units_label = QLabel("Location Point Accuracy Units:")
+        gps_units_label.setToolTip("Select the units used for location point accuracy in your data")
+        viz_layout.addWidget(gps_units_label, row, 0)
+        self.gps_units_combo = QComboBox()
+        self.gps_units_combo.addItems(["Meters", "Feet", "Miles", "Kilometers"])
+        self.gps_units_combo.setCurrentText("Meters")  # Default to meters
+        viz_layout.addWidget(self.gps_units_combo, row, 1)
+        row += 1
+        
+        # Default Location Point accuracy for missing data
+        default_accuracy_label = QLabel("Default Location Accuracy:")
+        default_accuracy_label.setToolTip("Default accuracy radius used when input location point data has no accuracy value (uses Location Point Accuracy Units above)")
+        viz_layout.addWidget(default_accuracy_label, row, 0)
+        self.default_accuracy_spinbox = QSpinBox()
+        self.default_accuracy_spinbox.setRange(1, 10000)
+        self.default_accuracy_spinbox.setValue(100)  # Default 100
+        viz_layout.addWidget(self.default_accuracy_spinbox, row, 1)
+        row += 1
+        
+        # Separator
+        separator3 = QFrame()
+        separator3.setFrameShape(QFrame.Shape.HLine)
+        separator3.setFrameShadow(QFrame.Shadow.Sunken)
+        separator3.setStyleSheet("color: #333333;")
+        viz_layout.addWidget(separator3, row, 0, 1, 2)
+        row += 1
+        
+        # ============ TIMELINE SETTINGS ============
+        timeline_label = QLabel("Timeline Settings")
+        timeline_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        timeline_label.setStyleSheet("color: #4ecdc4; font-weight: bold; font-size: 14px;")
+        viz_layout.addWidget(timeline_label, row, 0, 1, 2)
+        row += 1
         
         # Duration setting for time animation
         duration_label = QLabel("Animation Duration (minutes):")
         duration_label.setToolTip("How long each visualization stays visible during time animation (end time = start time + duration)")
-        viz_layout.addWidget(duration_label, 6, 0)
+        viz_layout.addWidget(duration_label, row, 0)
         self.duration_spinbox = QSpinBox()
         self.duration_spinbox.setRange(1, 1440)  # 1 minute to 24 hours
         self.duration_spinbox.setValue(30)  # Default to 30 minutes
-        viz_layout.addWidget(self.duration_spinbox, 6, 1)
+        viz_layout.addWidget(self.duration_spinbox, row, 1)
+        row += 1
         
+        # Add stretch to push controls to top and provide breathing room
+        viz_layout.setRowStretch(row, 1)
         
-        tab_widget.addTab(viz_tab, "Settings")
+        # Make Settings tab scrollable so controls have breathing room
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setWidget(viz_tab)
+        scroll_area.setStyleSheet("""
+            QScrollArea { border: none; background-color: #1e1e1e; }
+            QScrollBar:vertical { width: 12px; }
+            QScrollBar::handle:vertical { background-color: #444444; border-radius: 6px; }
+            QScrollBar::handle:vertical:hover { background-color: #555555; }
+        """)
+        
+        tab_widget.addTab(scroll_area, "Settings")
         
         # Colors Tab
         color_tab = QWidget()
@@ -330,13 +438,13 @@ class MainWindow(QMainWindow):
         self.shaded_color_button.clicked.connect(lambda: self.select_color("shaded"))
         color_layout.addWidget(self.shaded_color_button, 1, 1)
         
-        # Distance from Tower color
-        color_layout.addWidget(QLabel("Distance from Tower Arc Color:"), 2, 0)
-        self.ta_color_button = QPushButton()
-        self.ta_color = "ff0000ff"  # Red
-        self.ta_color_button.setStyleSheet(f"background-color: {self.kml_to_qt_color(self.ta_color)}")
-        self.ta_color_button.clicked.connect(lambda: self.select_color("ta"))
-        color_layout.addWidget(self.ta_color_button, 2, 1)
+        # Distance Band color
+        color_layout.addWidget(QLabel("Distance Band Color:"), 2, 0)
+        self.band_color_button = QPushButton()
+        self.band_color = "ff0099ff"  # Orange
+        self.band_color_button.setStyleSheet(f"background-color: {self.kml_to_qt_color(self.band_color)}")
+        self.band_color_button.clicked.connect(lambda: self.select_color("band"))
+        color_layout.addWidget(self.band_color_button, 2, 1)
         
         # Location Point color
         color_layout.addWidget(QLabel("Location Point Color:"), 3, 0)
@@ -353,7 +461,7 @@ class MainWindow(QMainWindow):
         # Set maximum height for tab widget to prevent excessive space
         tab_widget.setMaximumHeight(320)
         
-        layout.addWidget(tab_widget, 0)  # No stretch for tabs
+        layout.addWidget(tab_widget, 2)  # Give more space to Settings tab
         
         # Progress bar
         self.progress_bar = QProgressBar()
@@ -397,14 +505,15 @@ class MainWindow(QMainWindow):
         
         # Status text
         self.status_text = QTextEdit()
-        self.status_text.setMinimumHeight(80)
+        self.status_text.setMinimumHeight(60)  # Reduced from 80
+        self.status_text.setMaximumHeight(100)  # Reduced from 120
         self.status_text.setReadOnly(True)
-        layout.addWidget(self.status_text, 1)  # Add stretch to fill remaining space
+        layout.addWidget(self.status_text, 0)  # No stretch - keep minimal
         
         # Footer with version info (clickable links)
         footer_layout = QHBoxLayout()
-        footer_layout.setContentsMargins(0, 5, 0, 5) # top and bottom margins
-        version_label = QLabel('v1.0 | <a href="https://github.com/btc-git/OS-LOC-DAT-VIZ" style="color: #4ecdc4; text-decoration: none;">Open Source Location Data Visualizer</a> | <a href="license://show" style="color: #4ecdc4; text-decoration: none;">GPL v3.0</a>')
+        footer_layout.setContentsMargins(0, 2, 0, 2)  # Minimal top and bottom margins
+        version_label = QLabel('v1.1 | <a href="https://github.com/btc-git/OS-LOC-DAT-VIZ" style="color: #4ecdc4; text-decoration: none;">Open Source Location Data Visualizer</a> | <a href="license://show" style="color: #4ecdc4; text-decoration: none;">GPL v3.0</a>')
         version_label.setStyleSheet("color: #666666; font-size: 10px; font-style: italic;")
         version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         version_label.linkActivated.connect(self.handle_footer_link)
@@ -594,7 +703,7 @@ class MainWindow(QMainWindow):
                 any(col in ['timestamp', 'date & time', 'datetime', 'time'] for col in columns) and
                 any(col in ['azimuth', 'bearing', 'direction'] for col in columns) and
                 any(col in ['distance', 'range', 'distance (m)', 'distance (meters)'] for col in columns)):
-                detected_type = "timing_advance"
+                detected_type = "distance_from_tower"
                 self.ta_radio.setChecked(True)
                 self.add_status_message("✅ Valid Distance from Tower template detected")
                 
@@ -631,7 +740,7 @@ class MainWindow(QMainWindow):
                     self.tower_radio.setEnabled(True)
                     self.ta_radio.setEnabled(False)
                     self.gps_radio.setEnabled(False)
-                elif detected_type == "timing_advance":
+                elif detected_type == "distance_from_tower":
                     self.tower_radio.setEnabled(False)
                     self.ta_radio.setEnabled(True)
                     self.gps_radio.setEnabled(False)
@@ -764,10 +873,13 @@ class MainWindow(QMainWindow):
             'num_points': 25,  # value for arc smoothness
             'leg_color': self.leg_color,
             'shaded_color': self.shaded_color,
-            'ta_color': self.ta_color,
+            'band_color': self.band_color,
             'gps_color': self.gps_color,
             'gps_units': self.gps_units_combo.currentText(),
             'ta_distance_units': self.ta_distance_units_combo.currentText(),
+            'band_thickness_before': self.inside_band_spinbox.value(),  # New: inner band distance
+            'band_thickness': self.band_thickness_spinbox.value(),  # Outer band distance
+            'band_thickness_units': self.band_thickness_units_combo.currentText(),
             'default_accuracy': self.default_accuracy_spinbox.value(),
             'enable_time_animation': True,  # Always enabled
             'duration_minutes': self.duration_spinbox.value(),
@@ -859,7 +971,7 @@ class MainWindow(QMainWindow):
         
         # Distance from Tower template
         ta_action = menu.addAction("📏 Distance from Tower Template")
-        ta_action.triggered.connect(lambda: self.download_template("timing_advance"))
+        ta_action.triggered.connect(lambda: self.download_template("distance_from_tower"))
         
         # Point Location template
         gps_action = menu.addAction("📌 Location Point Template")
@@ -869,59 +981,61 @@ class MainWindow(QMainWindow):
         menu.exec(self.template_button.mapToGlobal(self.template_button.rect().bottomLeft()))
     
     def download_template(self, template_type):
-        """Download a specific CSV template"""
+        """Download a specific XLSX template with pre-formatted columns"""
+        from datetime import datetime
+        
         # Define template/sample data
         templates = {
             "cell_tower": {
-                "filename": "tower_sector_template.csv",
+                "filename": "tower_sector_template.xlsx",
                 "headers": ["Timestamp", "Latitude", "Longitude", "Azimuth"],
                 "sample_data": [
-                    ["2024-01-15 14:00:00", 43.15831, -77.60938, 240],
-                    ["2024-01-15 14:15:00", 43.15831, -77.60938, 240],
-                    ["2024-01-15 14:30:00", 43.15400, -77.61390, 335],
-                    ["2024-01-15 14:45:00", 43.15470, -77.63213, 90],
-                    ["2024-01-15 15:00:00", 43.16109, -77.65102, 180],
-                    ["2024-01-15 15:15:00", 43.16260, -77.67418, 180],
-                    ["2024-01-15 15:30:00", 43.15831, -77.60938, 240],
-                    ["2024-01-15 15:45:00", 43.15400, -77.61390, 335],
-                    ["2024-01-15 16:00:00", 43.15470, -77.63213, 90],
-                    ["2024-01-15 16:15:00", 43.16109, -77.65102, 180]
+                    [datetime(2024, 1, 15, 14, 0, 0), 43.15831, -77.60938, 240],
+                    [datetime(2024, 1, 15, 14, 15, 0), 43.15831, -77.60938, 240],
+                    [datetime(2024, 1, 15, 14, 30, 0), 43.15400, -77.61390, 335],
+                    [datetime(2024, 1, 15, 14, 45, 0), 43.15470, -77.63213, 90],
+                    [datetime(2024, 1, 15, 15, 0, 0), 43.16109, -77.65102, 180],
+                    [datetime(2024, 1, 15, 15, 15, 0), 43.16260, -77.67418, 180],
+                    [datetime(2024, 1, 15, 15, 30, 0), 43.15831, -77.60938, 240],
+                    [datetime(2024, 1, 15, 15, 45, 0), 43.15400, -77.61390, 335],
+                    [datetime(2024, 1, 15, 16, 0, 0), 43.15470, -77.63213, 90],
+                    [datetime(2024, 1, 15, 16, 15, 0), 43.16109, -77.65102, 180]
                 ],
                 "description": "Tower/Sector Data Template"
             },
 
-            "timing_advance": {
-                "filename": "timing_advance_template.csv",
+            "distance_from_tower": {
+                "filename": "distance_from_tower_template.xlsx",
                 "headers": ["Timestamp", "Latitude", "Longitude", "Azimuth", "Distance"],
                 "sample_data": [
-                    ["2024-01-15 14:00:00", 43.15831, -77.60938, 240, 0.8],
-                    ["2024-01-15 14:03:00", 43.15831, -77.60938, 240, 1.1],
-                    ["2024-01-15 14:06:00", 43.15400, -77.61390, 335, 0.4],
-                    ["2024-01-15 14:09:00", 43.15470, -77.63213, 90, 3.4],
-                    ["2024-01-15 14:12:00", 43.16109, -77.65102, 180, 1.7],
-                    ["2024-01-15 14:15:00", 43.16260, -77.67418, 180, 2.5],
-                    ["2024-01-15 14:18:00", 43.15831, -77.60938, 240, 4.2],
-                    ["2024-01-15 14:21:00", 43.15400, -77.61390, 335, 1.3],
-                    ["2024-01-15 14:24:00", 43.15470, -77.63213, 90, 0.5],
-                    ["2024-01-15 14:27:00", 43.16109, -77.65102, 180, 1.8]
+                    [datetime(2024, 1, 15, 14, 0, 0), 43.15831, -77.60938, 240, 0.8],
+                    [datetime(2024, 1, 15, 14, 3, 0), 43.15831, -77.60938, 240, 1.1],
+                    [datetime(2024, 1, 15, 14, 6, 0), 43.15400, -77.61390, 335, 0.4],
+                    [datetime(2024, 1, 15, 14, 9, 0), 43.15470, -77.63213, 90, 3.4],
+                    [datetime(2024, 1, 15, 14, 12, 0), 43.16109, -77.65102, 180, 1.7],
+                    [datetime(2024, 1, 15, 14, 15, 0), 43.16260, -77.67418, 180, 2.5],
+                    [datetime(2024, 1, 15, 14, 18, 0), 43.15831, -77.60938, 240, 4.2],
+                    [datetime(2024, 1, 15, 14, 21, 0), 43.15400, -77.61390, 335, 1.3],
+                    [datetime(2024, 1, 15, 14, 24, 0), 43.15470, -77.63213, 90, 0.5],
+                    [datetime(2024, 1, 15, 14, 27, 0), 43.16109, -77.65102, 180, 1.8]
                 ],
                 "description": "Distance from Tower Data Template"
             },
 
             "gps": {
-                "filename": "location_point_template.csv",
+                "filename": "location_point_template.xlsx",
                 "headers": ["Timestamp", "Latitude", "Longitude", "Accuracy"],
                 "sample_data": [
-                    ["2024-01-15 14:00:00", 43.156622, -77.608895, 250],
-                    ["2024-01-15 14:01:00", 43.157830, -77.605310, 200],
-                    ["2024-01-15 14:02:00", 43.158941, -77.601745, 150],
-                    ["2024-01-15 14:03:00", 43.159756, -77.594527, 300],
-                    ["2024-01-15 14:04:00", 43.161422, -77.591803, 200],
-                    ["2024-01-15 14:05:00", 43.163650, -77.590300, 150],
-                    ["2024-01-15 14:06:00", 43.166050, -77.589700, 100],
-                    ["2024-01-15 14:07:00", 43.168453, -77.589232, 500],
-                    ["2024-01-15 14:08:00", 43.167950, -77.589800, 200],
-                    ["2024-01-15 14:09:00", 43.167541, -77.590212, 150]
+                    [datetime(2024, 1, 15, 14, 0, 0), 43.156622, -77.608895, 250],
+                    [datetime(2024, 1, 15, 14, 1, 0), 43.157830, -77.605310, 200],
+                    [datetime(2024, 1, 15, 14, 2, 0), 43.158941, -77.601745, 150],
+                    [datetime(2024, 1, 15, 14, 3, 0), 43.159756, -77.594527, 300],
+                    [datetime(2024, 1, 15, 14, 4, 0), 43.161422, -77.591803, 200],
+                    [datetime(2024, 1, 15, 14, 5, 0), 43.163650, -77.590300, 150],
+                    [datetime(2024, 1, 15, 14, 6, 0), 43.166050, -77.589700, 100],
+                    [datetime(2024, 1, 15, 14, 7, 0), 43.168453, -77.589232, 500],
+                    [datetime(2024, 1, 15, 14, 8, 0), 43.167950, -77.589800, 200],
+                    [datetime(2024, 1, 15, 14, 9, 0), 43.167541, -77.590212, 150]
                 ],
                 "description": "Location Point Template"
             }
@@ -937,16 +1051,44 @@ class MainWindow(QMainWindow):
             self,
             f"Save {template['description']}",
             template['filename'],
-            "CSV Files (*.csv);;All Files (*)"
+            "Excel Files (*.xlsx);;All Files (*)"
         )
         
         if output_file:
             try:
-                # Create DataFrame with template data
-                df = pd.DataFrame(template['sample_data'], columns=template['headers'])
+                # Create workbook with openpyxl for proper formatting
+                wb = Workbook()
+                ws = wb.active
+                # Excel sheet names cannot contain: \ / ? * [ ]
+                safe_title = template['description'].replace('/', '-').replace('\\', '-')
+                ws.title = safe_title[:31]
                 
-                # Save to CSV
-                df.to_csv(output_file, index=False)
+                # Write headers with bold font
+                header_font = Font(bold=True)
+                for col_idx, header in enumerate(template['headers'], 1):
+                    cell = ws.cell(row=1, column=col_idx, value=header)
+                    cell.font = header_font
+                
+                # Write sample data
+                timestamp_col = template['headers'].index('Timestamp') + 1  # 1-based
+                for row_idx, row_data in enumerate(template['sample_data'], 2):
+                    for col_idx, value in enumerate(row_data, 1):
+                        cell = ws.cell(row=row_idx, column=col_idx, value=value)
+                        # Format timestamp column to show seconds
+                        if col_idx == timestamp_col:
+                            cell.number_format = 'YYYY-MM-DD HH:MM:SS'
+                
+                # Auto-fit column widths
+                for col_idx, header in enumerate(template['headers'], 1):
+                    # Set reasonable widths based on content
+                    if header == 'Timestamp':
+                        ws.column_dimensions[chr(64 + col_idx)].width = 22
+                    elif header in ('Latitude', 'Longitude'):
+                        ws.column_dimensions[chr(64 + col_idx)].width = 14
+                    else:
+                        ws.column_dimensions[chr(64 + col_idx)].width = 12
+                
+                wb.save(output_file)
                 
                 self.add_status_message(f"✅ Template saved: {Path(output_file).name}")
                 
@@ -960,8 +1102,10 @@ class MainWindow(QMainWindow):
                     f"{template['description']} has been saved.\n\n"
                     f"The template includes:\n"
                     f"• Required column headers: {', '.join(template['headers'])}\n"
-                    f"• Sample data rows to show the expected format\n\n"
-                    f"Carefully replace the sample data with your own data in Excel or another program and save the file as either a CSV or XLSX. You can also load this sample file directly to see how the visualizer works."
+                    f"• Sample data rows to show the expected format\n"
+                    f"• Timestamp column pre-formatted to show seconds (HH:MM:SS)\n\n"
+                    f"Replace the sample data with your own data and save. "
+                    f"You can also load this sample file directly to see how the visualizer works."
                 )
                 
             except Exception as e:
