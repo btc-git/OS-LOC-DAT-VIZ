@@ -9,6 +9,7 @@ import textwrap
 import re
 from datetime import datetime, timedelta
 from pathlib import Path
+from xml.sax.saxutils import escape as xml_escape
 from PyQt6.QtCore import QThread, pyqtSignal
 
 
@@ -91,7 +92,7 @@ class KMLGenerator(QThread):
     def generate_cell_tower_kml(self, df):
         """Generate KML for tower/sector data"""
         # Use custom label if provided, otherwise default
-        doc_name = self.settings.get('custom_label') or "Tower/Sector Data"
+        doc_name = xml_escape(self.settings.get('custom_label') or "Tower/Sector Data")
         
         kml_header = textwrap.dedent(f'''\
             <?xml version="1.0" encoding="UTF-8"?>
@@ -147,7 +148,7 @@ class KMLGenerator(QThread):
     def generate_distance_from_tower_kml(self, df):
         """Generate KML for distance from tower data with arc visualization"""
         # Use custom label if provided, otherwise default
-        doc_name = self.settings.get('custom_label') or "Distance from Tower Analysis"
+        doc_name = xml_escape(self.settings.get('custom_label') or "Distance from Tower Analysis")
         
         kml_header = textwrap.dedent(f'''\
             <?xml version="1.0" encoding="UTF-8"?>
@@ -224,7 +225,7 @@ class KMLGenerator(QThread):
     def generate_gps_kml(self, df):
         """Generate KML for location point data"""
         # Use custom label if provided, otherwise default
-        doc_name = self.settings.get('custom_label') or "Location Point Data"
+        doc_name = xml_escape(self.settings.get('custom_label') or "Location Point Data")
         
         kml_header = textwrap.dedent(f'''\
             <?xml version="1.0" encoding="UTF-8"?>
@@ -1001,12 +1002,8 @@ class KMLGenerator(QThread):
                     <PolyStyle>
                         <color>{band_color}</color>
                         <fill>1</fill>
-                        <outline>1</outline>
+                        <outline>0</outline>
                     </PolyStyle>
-                    <LineStyle>
-                        <color>{band_color}</color>
-                        <width>2</width>
-                    </LineStyle>
                 </Style>
                 <Polygon>
                     <outerBoundaryIs>
@@ -1110,12 +1107,8 @@ class KMLGenerator(QThread):
                         <PolyStyle>
                             <color>{band_color}</color>
                             <fill>1</fill>
-                            <outline>1</outline>
+                            <outline>0</outline>
                         </PolyStyle>
-                        <LineStyle>
-                            <color>{band_color}</color>
-                            <width>2</width>
-                        </LineStyle>
                     </Style>
                     <Polygon>
                         <outerBoundaryIs>
