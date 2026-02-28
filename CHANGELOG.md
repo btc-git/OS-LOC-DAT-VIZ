@@ -12,8 +12,8 @@
 ### Fixed
 - Templates changed from CSV to XLSX to prevent Excel from dropping seconds on some timestamps
 - Fixed AM/PM timestamp handling (12 PM, 12 AM edge cases)
-
----
+- Fixed Google Earth timeline animation using correct KML TimeSpan elements
+- Other minor fixes
 
 ## [1.0] - 2025-11-02
 
