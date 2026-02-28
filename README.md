@@ -14,19 +14,21 @@ A standalone desktop application for **quick triage and initial visualization** 
 ### 🎯 **Data Type Support**
 
 - **Tower/Sector Data**: Creates directional wedges with azimuth (does not depict coverage)
-- **Distance from Tower Data**: Generates distance-based arcs from tower
+- **Distance from Tower Data**: Generates distance-based band visualization with configurable inner/outer band distances
 - **Location Point Data**: Displays points with accuracy radius circles
 
 ### 🎨 **Customizable Visualization**
 
-- Adjustable sector width
+- Adjustable sector width, leg length, and shaded area length
+- Configurable distance band (inner/outer) for Distance from Tower data
 - Color-coded data types with customizable colors
+- Configurable unit support (Meters, Feet, Miles, Kilometers)
 - Time animation support for chronological display
 
 ### 🖥️ **User-Friendly Interface**
 
 - Drag-and-drop file input
-- Built-in sample templates for proper formatting
+- Built-in sample XLSX templates for proper formatting
 
 ## Application Screenshot
 
@@ -122,6 +124,10 @@ Download the standalone executable `OS-LocationDataVisualizer.exe` - no Python i
    ```
 2. Build the executable:
    ```bash
+   # Option 1: Use the spec file (recommended)
+   pyinstaller app.spec
+
+   # Option 2: Full command-line
    pyinstaller --onefile --windowed --name "OS-LocationDataVisualizer" --icon=wifi_icon.ico --exclude-module=matplotlib --exclude-module=scipy --exclude-module=numba --noupx app.py
    ```
 3. Find the executable in the `dist/` directory (the file will be named `OS-LocationDataVisualizer.exe`)
@@ -137,7 +143,7 @@ Download the standalone executable `OS-LocationDataVisualizer.exe` - no Python i
 
 ## Sample Data Templates
 
-The application includes built-in templates for each data type. Click the "📁 Templates" button in the application to download properly formatted CSV files with sample data and correct column headers.
+The application includes built-in templates for each data type. Click the "📁 Templates" button in the application to download properly formatted XLSX files with sample data and correct column headers.
 
 ---
 ## License

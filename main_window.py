@@ -1059,7 +1059,9 @@ class MainWindow(QMainWindow):
                 # Create workbook with openpyxl for proper formatting
                 wb = Workbook()
                 ws = wb.active
-                ws.title = template['description'][:31]
+                # Excel sheet names cannot contain: \ / ? * [ ]
+                safe_title = template['description'].replace('/', '-').replace('\\', '-')
+                ws.title = safe_title[:31]
                 
                 # Write headers with bold font
                 header_font = Font(bold=True)

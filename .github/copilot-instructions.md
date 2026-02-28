@@ -148,7 +148,7 @@ Output: `dist/OS-LocationDataVisualizer.exe` (self-contained, ~50MB)
 - Time animation: `<gx:TimeSpan><begin>2025-01-15T14:30:00Z</begin><end>2025-01-15T15:00:00Z</end></gx:TimeSpan>`
 
 **Windows Integration:**
-- Taskbar grouping: `SetCurrentProcessExplicitAppUserModelID('opensource.locationvisualizer.1.0')`
+- Taskbar grouping: `SetCurrentProcessExplicitAppUserModelID('opensource.locationvisualizer.1.1')`
 - Explorer integration: `subprocess.Popen(['explorer', '/select,', file_path])`
 
 **User Workflows:**
