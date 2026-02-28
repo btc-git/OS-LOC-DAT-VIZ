@@ -7,6 +7,8 @@ import pandas as pd
 import subprocess
 import sys
 from pathlib import Path
+from openpyxl import Workbook
+from openpyxl.styles import Font, numbers
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QGridLayout, QPushButton, QLabel, QFileDialog, 
                              QSpinBox, QDoubleSpinBox, QRadioButton, QButtonGroup, 
@@ -90,7 +92,7 @@ class MainWindow(QMainWindow):
         # Templates button
         self.template_button = QPushButton("📁 Templates")
         self.template_button.setMaximumWidth(120)
-        self.template_button.setToolTip("Download template CSV files with correct headers for each data type")
+        self.template_button.setToolTip("Download template Excel files with correct headers for each data type")
         self.template_button.clicked.connect(self.show_template_menu)
         self.template_button.setStyleSheet("""
             QPushButton {
@@ -979,59 +981,61 @@ class MainWindow(QMainWindow):
         menu.exec(self.template_button.mapToGlobal(self.template_button.rect().bottomLeft()))
     
     def download_template(self, template_type):
-        """Download a specific CSV template"""
+        """Download a specific XLSX template with pre-formatted columns"""
+        from datetime import datetime
+        
         # Define template/sample data
         templates = {
             "cell_tower": {
-                "filename": "tower_sector_template.csv",
+                "filename": "tower_sector_template.xlsx",
                 "headers": ["Timestamp", "Latitude", "Longitude", "Azimuth"],
                 "sample_data": [
-                    ["2024-01-15 14:00:00", 43.15831, -77.60938, 240],
-                    ["2024-01-15 14:15:00", 43.15831, -77.60938, 240],
-                    ["2024-01-15 14:30:00", 43.15400, -77.61390, 335],
-                    ["2024-01-15 14:45:00", 43.15470, -77.63213, 90],
-                    ["2024-01-15 15:00:00", 43.16109, -77.65102, 180],
-                    ["2024-01-15 15:15:00", 43.16260, -77.67418, 180],
-                    ["2024-01-15 15:30:00", 43.15831, -77.60938, 240],
-                    ["2024-01-15 15:45:00", 43.15400, -77.61390, 335],
-                    ["2024-01-15 16:00:00", 43.15470, -77.63213, 90],
-                    ["2024-01-15 16:15:00", 43.16109, -77.65102, 180]
+                    [datetime(2024, 1, 15, 14, 0, 0), 43.15831, -77.60938, 240],
+                    [datetime(2024, 1, 15, 14, 15, 0), 43.15831, -77.60938, 240],
+                    [datetime(2024, 1, 15, 14, 30, 0), 43.15400, -77.61390, 335],
+                    [datetime(2024, 1, 15, 14, 45, 0), 43.15470, -77.63213, 90],
+                    [datetime(2024, 1, 15, 15, 0, 0), 43.16109, -77.65102, 180],
+                    [datetime(2024, 1, 15, 15, 15, 0), 43.16260, -77.67418, 180],
+                    [datetime(2024, 1, 15, 15, 30, 0), 43.15831, -77.60938, 240],
+                    [datetime(2024, 1, 15, 15, 45, 0), 43.15400, -77.61390, 335],
+                    [datetime(2024, 1, 15, 16, 0, 0), 43.15470, -77.63213, 90],
+                    [datetime(2024, 1, 15, 16, 15, 0), 43.16109, -77.65102, 180]
                 ],
                 "description": "Tower/Sector Data Template"
             },
 
             "distance_from_tower": {
-                "filename": "distance_from_tower_template.csv",
+                "filename": "distance_from_tower_template.xlsx",
                 "headers": ["Timestamp", "Latitude", "Longitude", "Azimuth", "Distance"],
                 "sample_data": [
-                    ["2024-01-15 14:00:00", 43.15831, -77.60938, 240, 0.8],
-                    ["2024-01-15 14:03:00", 43.15831, -77.60938, 240, 1.1],
-                    ["2024-01-15 14:06:00", 43.15400, -77.61390, 335, 0.4],
-                    ["2024-01-15 14:09:00", 43.15470, -77.63213, 90, 3.4],
-                    ["2024-01-15 14:12:00", 43.16109, -77.65102, 180, 1.7],
-                    ["2024-01-15 14:15:00", 43.16260, -77.67418, 180, 2.5],
-                    ["2024-01-15 14:18:00", 43.15831, -77.60938, 240, 4.2],
-                    ["2024-01-15 14:21:00", 43.15400, -77.61390, 335, 1.3],
-                    ["2024-01-15 14:24:00", 43.15470, -77.63213, 90, 0.5],
-                    ["2024-01-15 14:27:00", 43.16109, -77.65102, 180, 1.8]
+                    [datetime(2024, 1, 15, 14, 0, 0), 43.15831, -77.60938, 240, 0.8],
+                    [datetime(2024, 1, 15, 14, 3, 0), 43.15831, -77.60938, 240, 1.1],
+                    [datetime(2024, 1, 15, 14, 6, 0), 43.15400, -77.61390, 335, 0.4],
+                    [datetime(2024, 1, 15, 14, 9, 0), 43.15470, -77.63213, 90, 3.4],
+                    [datetime(2024, 1, 15, 14, 12, 0), 43.16109, -77.65102, 180, 1.7],
+                    [datetime(2024, 1, 15, 14, 15, 0), 43.16260, -77.67418, 180, 2.5],
+                    [datetime(2024, 1, 15, 14, 18, 0), 43.15831, -77.60938, 240, 4.2],
+                    [datetime(2024, 1, 15, 14, 21, 0), 43.15400, -77.61390, 335, 1.3],
+                    [datetime(2024, 1, 15, 14, 24, 0), 43.15470, -77.63213, 90, 0.5],
+                    [datetime(2024, 1, 15, 14, 27, 0), 43.16109, -77.65102, 180, 1.8]
                 ],
                 "description": "Distance from Tower Data Template"
             },
 
             "gps": {
-                "filename": "location_point_template.csv",
+                "filename": "location_point_template.xlsx",
                 "headers": ["Timestamp", "Latitude", "Longitude", "Accuracy"],
                 "sample_data": [
-                    ["2024-01-15 14:00:00", 43.156622, -77.608895, 250],
-                    ["2024-01-15 14:01:00", 43.157830, -77.605310, 200],
-                    ["2024-01-15 14:02:00", 43.158941, -77.601745, 150],
-                    ["2024-01-15 14:03:00", 43.159756, -77.594527, 300],
-                    ["2024-01-15 14:04:00", 43.161422, -77.591803, 200],
-                    ["2024-01-15 14:05:00", 43.163650, -77.590300, 150],
-                    ["2024-01-15 14:06:00", 43.166050, -77.589700, 100],
-                    ["2024-01-15 14:07:00", 43.168453, -77.589232, 500],
-                    ["2024-01-15 14:08:00", 43.167950, -77.589800, 200],
-                    ["2024-01-15 14:09:00", 43.167541, -77.590212, 150]
+                    [datetime(2024, 1, 15, 14, 0, 0), 43.156622, -77.608895, 250],
+                    [datetime(2024, 1, 15, 14, 1, 0), 43.157830, -77.605310, 200],
+                    [datetime(2024, 1, 15, 14, 2, 0), 43.158941, -77.601745, 150],
+                    [datetime(2024, 1, 15, 14, 3, 0), 43.159756, -77.594527, 300],
+                    [datetime(2024, 1, 15, 14, 4, 0), 43.161422, -77.591803, 200],
+                    [datetime(2024, 1, 15, 14, 5, 0), 43.163650, -77.590300, 150],
+                    [datetime(2024, 1, 15, 14, 6, 0), 43.166050, -77.589700, 100],
+                    [datetime(2024, 1, 15, 14, 7, 0), 43.168453, -77.589232, 500],
+                    [datetime(2024, 1, 15, 14, 8, 0), 43.167950, -77.589800, 200],
+                    [datetime(2024, 1, 15, 14, 9, 0), 43.167541, -77.590212, 150]
                 ],
                 "description": "Location Point Template"
             }
@@ -1047,16 +1051,42 @@ class MainWindow(QMainWindow):
             self,
             f"Save {template['description']}",
             template['filename'],
-            "CSV Files (*.csv);;All Files (*)"
+            "Excel Files (*.xlsx);;All Files (*)"
         )
         
         if output_file:
             try:
-                # Create DataFrame with template data
-                df = pd.DataFrame(template['sample_data'], columns=template['headers'])
+                # Create workbook with openpyxl for proper formatting
+                wb = Workbook()
+                ws = wb.active
+                ws.title = template['description'][:31]
                 
-                # Save to CSV
-                df.to_csv(output_file, index=False)
+                # Write headers with bold font
+                header_font = Font(bold=True)
+                for col_idx, header in enumerate(template['headers'], 1):
+                    cell = ws.cell(row=1, column=col_idx, value=header)
+                    cell.font = header_font
+                
+                # Write sample data
+                timestamp_col = template['headers'].index('Timestamp') + 1  # 1-based
+                for row_idx, row_data in enumerate(template['sample_data'], 2):
+                    for col_idx, value in enumerate(row_data, 1):
+                        cell = ws.cell(row=row_idx, column=col_idx, value=value)
+                        # Format timestamp column to show seconds
+                        if col_idx == timestamp_col:
+                            cell.number_format = 'YYYY-MM-DD HH:MM:SS'
+                
+                # Auto-fit column widths
+                for col_idx, header in enumerate(template['headers'], 1):
+                    # Set reasonable widths based on content
+                    if header == 'Timestamp':
+                        ws.column_dimensions[chr(64 + col_idx)].width = 22
+                    elif header in ('Latitude', 'Longitude'):
+                        ws.column_dimensions[chr(64 + col_idx)].width = 14
+                    else:
+                        ws.column_dimensions[chr(64 + col_idx)].width = 12
+                
+                wb.save(output_file)
                 
                 self.add_status_message(f"✅ Template saved: {Path(output_file).name}")
                 
@@ -1070,8 +1100,10 @@ class MainWindow(QMainWindow):
                     f"{template['description']} has been saved.\n\n"
                     f"The template includes:\n"
                     f"• Required column headers: {', '.join(template['headers'])}\n"
-                    f"• Sample data rows to show the expected format\n\n"
-                    f"Carefully replace the sample data with your own data in Excel or another program and save the file as either a CSV or XLSX. You can also load this sample file directly to see how the visualizer works."
+                    f"• Sample data rows to show the expected format\n"
+                    f"• Timestamp column pre-formatted to show seconds (HH:MM:SS)\n\n"
+                    f"Replace the sample data with your own data and save. "
+                    f"You can also load this sample file directly to see how the visualizer works."
                 )
                 
             except Exception as e:
