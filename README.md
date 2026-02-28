@@ -7,10 +7,13 @@ This application was developed with AI assistance and has undergone human review
 
 A standalone desktop application for **quick triage and initial visualization** of location data. This tool converts data containing tower/sector, distance from tower, and location point information into KML files for preliminary analysis.
 
-**[⬇️ Download the latest OS-LocationDataVisualizer.exe](https://github.com/btc-git/OS-LOC-DAT-VIZ/releases/latest/download/OS-LocationDataVisualizer.exe)**
-
-
 ⚠️ **IMPORTANT: This is for initial review only. All findings must be analyzed and verified.**
+
+<br>
+<a href="https://github.com/btc-git/OS-LOC-DAT-VIZ/releases/latest/download/OS-LocationDataVisualizer.exe" style="text-decoration:none;font-weight:bold;font-size:1.1em;">
+⬇️ Download the latest OS-LocationDataVisualizer.exe
+</a>
+<br>
 
 ## Features
 
