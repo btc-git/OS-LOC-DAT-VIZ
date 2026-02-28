@@ -513,7 +513,7 @@ class MainWindow(QMainWindow):
         # Footer with version info (clickable links)
         footer_layout = QHBoxLayout()
         footer_layout.setContentsMargins(0, 2, 0, 2)  # Minimal top and bottom margins
-        version_label = QLabel('v1.0 | <a href="https://github.com/btc-git/OS-LOC-DAT-VIZ" style="color: #4ecdc4; text-decoration: none;">Open Source Location Data Visualizer</a> | <a href="license://show" style="color: #4ecdc4; text-decoration: none;">GPL v3.0</a>')
+        version_label = QLabel('v1.1 | <a href="https://github.com/btc-git/OS-LOC-DAT-VIZ" style="color: #4ecdc4; text-decoration: none;">Open Source Location Data Visualizer</a> | <a href="license://show" style="color: #4ecdc4; text-decoration: none;">GPL v3.0</a>')
         version_label.setStyleSheet("color: #666666; font-size: 10px; font-style: italic;")
         version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         version_label.linkActivated.connect(self.handle_footer_link)

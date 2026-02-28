@@ -150,5 +150,5 @@ This program is distributed in the hope that it will be useful, but WITHOUT ANY 
 
 ---
 Copyright (c) 2025 CrimLawTech LLC
-**Version 1.0**  
+**Version 1.1**  
 _Open Source Location Data Visualization Tool_

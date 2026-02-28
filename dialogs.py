@@ -117,7 +117,7 @@ class DisclaimerDialog(QDialog):
 </ul>
 
 <p style='text-align: center; margin-top: 30px; color: #666666; font-style: italic;'>
-Version 1.0<br/>
+Version 1.1<br/>
 Open Source Location Data Visualization Tool<br/>
 <br/>
 <strong>📜 Open Source License:</strong> <a href="license://show" style="color:#4ecdc4; text-decoration:underline; cursor:pointer;">LICENSE</a> (GNU GPL v3.0)<br/>
