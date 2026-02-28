@@ -84,7 +84,7 @@ The application supports **18+ timestamp formats**, including:
 
 ## Open Source & Contributing
 
-This is an open source project. Found a bug or have a suggestion? [Contribute or open an issue on GitHub.](https://github.com/btc-git/OS-LOC-DAT-VIZ)
+This is an open source project. Found a bug or have a suggestion? [Open an issue or suggest a feature here.](https://github.com/btc-git/OS-LOC-DAT-VIZ/issues)
 
 
 ## Installation & Distribution
