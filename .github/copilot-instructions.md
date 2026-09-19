@@ -1,33 +1,36 @@
 # Open Source Location Data Visualizer — AI Coding Agent Guide
 
 ## Project Overview
-Desktop triage tool for converting CSV/Excel location data into Google Earth KML visualizations. **All outputs are preliminary and require expert review.** Users can customize visualizations (sector widths, leg lengths, colors, time animation) and export to Google Earth.
+Desktop triage tool for converting CSV/Excel location data into paired KML and GeoJSON visualizations. **All outputs are preliminary and require expert review.** Users can customize geometry, colors, units, and time handling for Google Earth and GeoLibre/MapLibre workflows.
 
 ## Architecture & Key Files
 
 **Entry Points & Threading:**
 - `app.py`: Creates Qt application, sets Windows taskbar identity (`SetCurrentProcessExplicitAppUserModelID`), creates MainWindow, shows disclaimer
-- `main_window.py` (~1160 lines): Central GUI hub managing all UI state, settings persistence, file validation, thread orchestration
-- `kml_generator.py` (QThread subclass): Background worker thread for KML generation—never blocks UI; emits `progress`, `finished`, `error`, `status_message` signals
+- `main_window.py`: Central GUI hub managing UI state, settings persistence, import validation, paired output writes, audit logs, and thread orchestration
+- `kml_generator.py` (QThread subclass): Background worker for KML/GeoJSON generation; emits `progress`, `finished`, `error`, and `status_message` signals
 
 **UI & Input:**
 - `widgets.py`: Custom `DragDropWidget` frame with drag-enter feedback (`dragActive` property for styling)
+- `import_wizard.py`: Non-template CSV/XLS/XLSX sheet, header, field, timezone, and date-range mapping workflow
 - `dialogs.py`: `DisclaimerDialog` (shown on every startup, non-negotiable legal requirement); also references `LicenseDialog` from `license_dialog.py`
+- `GeoLibre-Plugin/`: Readable GeoLibre runtime plugin source and manifest; generated ZIP packages remain ignored
 
 ## Data Processing Pipeline
 
-1. **File Input** → `handle_file_selection(file_path)`: Loads CSV (pandas) or Excel (openpyxl), reads first row to detect data type
+1. **File Input** → `handle_file_selection(file_path)`: Recognizes standard templates directly and opens `ImportWizardDialog` for other CSV/XLS/XLSX layouts
 2. **Type Detection** → Column header matching with case-insensitive, flexible name aliases:
    - **Tower/Sector**: Has Latitude, Longitude, Timestamp, Azimuth (NO Distance) → creates sector wedges
    - **Distance from Tower**: Has Latitude, Longitude, Timestamp, Azimuth, Distance → creates sector + distance band
    - **Location Point**: Has Latitude, Longitude, Timestamp, optionally Accuracy → creates accuracy circles
 3. **Validation** → Button disabled if type unclear; shows status messages with emoji indicators (✅, ⚠️, ❌, 📊, 📄)
-4. **KML Generation** → Threaded via `KMLGenerator.run()`:
-   - Calls type-specific generator (`generate_cell_tower_kml()`, `generate_distance_from_tower_kml()`, `generate_gps_kml()`)
-   - Converts lat/lon to KML (6 decimal places), calculates geographic points via `destination_point()`
-   - Wraps visualizations in timestamped folders with time animation (`<TimeSpan>`)
+4. **Output Generation** → Threaded via `KMLGenerator.run()`:
+  - Calls type-specific KML and GeoJSON generators
+  - Preserves source coordinate text precision and formats derived geometry to 6 decimal places
+  - Adds matching dataset/event/component/time metadata to both formats
+  - Uses KML `<TimeSpan>` and GeoJSON epoch metadata for time filtering
    - Custom labels XML-escaped via `xml.sax.saxutils.escape()` before insertion into KML
-5. **Output** → KML string written to file via `on_generation_finished()`; launches Google Earth with result
+5. **Output** → `finished` emits a `{kml, geojson}` payload; `on_generation_finished()` writes same-named `.kml`, `.geojson`, and `.txt` audit-log files, then opens the containing folder
 
 ## Project-Specific Patterns
 
@@ -46,7 +49,7 @@ Desktop triage tool for converting CSV/Excel location data into Google Earth KML
 - Settings stored in `QSettings("OpenSource", "LocationDataVisualizer")`
 - Configurable per-session: leg length (0.5–20 mi), sector width (30–360°), shaded area length (0.1–10 mi), default accuracy, colors, time animation duration
 - Distance band settings: inner/outer thickness (default 0), configurable units (Meters/Feet/Miles/Kilometers), band color
-- Custom KML label field (`custom_label_input`) for user-provided document names; XML-escaped for KML, sanitized for filenames
+- Custom label field (`custom_label_input`) for user-provided dataset names; XML-escaped for KML and sanitized for filenames
 
 ### Status Console & User Feedback
 - Use `add_status_message(msg)` for all user-visible feedback (errors, warnings, progress)
@@ -60,12 +63,13 @@ Desktop triage tool for converting CSV/Excel location data into Google Earth KML
 
 ### File Handling
 - **Always** use `Path` from `pathlib` for cross-platform compatibility (Windows/Unix)
-- Drag-drop widget validates `.csv` and `.xlsx` extensions before accepting
-- CSV detection via `pd.read_csv()`, Excel via `pd.read_excel(..., engine='openpyxl')`
+- Drag/drop and import workflows accept `.csv`, `.xls`, and `.xlsx`
+- CSV uses pandas; `.xlsx` uses openpyxl and `.xls` uses xlrd
+- Keep source records and generated KML/GeoJSON/log files outside Git; root-level data formats and diagnostic output directories are ignored
 
 ### Threading & Signals
-- KML generation **must** run in `QThread` background worker (not main thread)
-- Emit progress (0–100), finished (KML string), error (exception str), status_message (UI updates) via Qt signals
+- Output generation **must** run in the `QThread` worker (not the main thread)
+- Emit progress (0–100), finished (KML/GeoJSON dict), error (exception str), and status_message (UI updates) via Qt signals
 - Main window connects slots: `progress_bar.setValue()`, `on_generation_finished()`, `on_generation_error()`, `add_status_message()`
 - Never call UI updates directly from worker thread
 
@@ -77,7 +81,7 @@ Desktop triage tool for converting CSV/Excel location data into Google Earth KML
 - Distance conversions handled in `convert_gps_accuracy_to_miles()` and `convert_ta_distance_to_miles()` (Meters/Feet/Miles/Kilometers)
 
 ### Timestamp Parsing
-- `parse_timestamp_to_kml(timestamp_str)`: Handles 18+ flexible formats (pre-processing + regex patterns)
+- `parse_timestamp_to_kml(timestamp_str)`: Handles 18+ flexible formats with selected or explicit timezone interpretation
   - **Supported formats** (all tested and working):
     - **ISO**: `2025-01-15T14:30:00`, `2025-01-15 14:30`, `2025-01-15`, `2025/02/11 11:06:07`
     - **US 4-digit**: `01/15/2025 2:30 PM`, `01/15/2025 2:30`, `01/15/2025`
@@ -85,12 +89,9 @@ Desktop triage tool for converting CSV/Excel location data into Google Earth KML
     - **European**: `15.01.2025 14:30:00`, `15.01.2025 14:30`, `15.01.2025`
     - **Time-only**: `14:30:00`, `2:30 PM` (uses today's date)
     - **Excel serial**: `45696.7637037037` (converts with Excel epoch, handles 1900 leap year bug)
-    - **With timezone**: `2019/05/03 18:36:04 (GMT -4)`, `2025-02-11 11:06:07.557 EST` (auto-strips timezone and milliseconds)
-  - **Pre-processing steps**:
-    1. Try Excel serial conversion first (numeric values 1–50000)
-    2. Strip timezone in parentheses `(GMT±X)`, `(UTC±X)` via regex
-    3. Strip timezone abbreviations (EST, UTC, GMT, etc.) from end
-    4. Strip milliseconds/microseconds (`.557` → removed)
+    - **With timezone**: `2019/05/03 18:36:04 (GMT -4)`, `2025-02-11T14:30:00Z`, and recognized abbreviations
+  - Explicit timezone information in a record takes precedence over the selected source timezone or fixed offset
+  - Named timezones apply historical DST rules; ambiguous or nonexistent local times are omitted and reported
   - **Return value**: Tuple `(KML ISO format YYYY-MM-DDTHH:MM:SSZ, display label)`
   - **Edge cases**:
     - Time-only entries use today's date; display shows only time
@@ -128,31 +129,34 @@ python app.py  # Runs with disclaimer dialog
 **Build Executable:**
 ```powershell
 # Option 1: Use app.spec (includes icon config)
-pyinstaller app.spec
+python -m PyInstaller app.spec
 
 # Option 2: Full command-line
-pyinstaller --onefile --windowed --name "OS-LocationDataVisualizer" --icon=wifi_icon.ico --exclude-module=matplotlib --exclude-module=scipy --exclude-module=numba --noupx app.py
+python -m PyInstaller --onefile --windowed --name "OS-LocationDataVisualizer" --icon=wifi_icon.ico --exclude-module=matplotlib --exclude-module=scipy --exclude-module=numba --noupx app.py
 ```
 Output: `dist/OS-LocationDataVisualizer.exe` (self-contained, ~50MB)
 
 **Testing:**
-- Use `download_template()` method to generate sample XLSX files with proper headers and pre-formatted columns
-- Create test files with missing columns/rows to validate error handling
-- Verify status messages appear for each edge case (missing azimuth, distance, accuracy)
-- Test timestamp parsing with samples from README (ISO, US, European formats)
+```powershell
+python -m unittest discover -s tests -v
+node --check tools/plugin_performance_harness.mjs
+```
+- Automated tests cover import mapping, timezone/DST behavior, KML metadata and geometry, and KML/GeoJSON parity
+- Manual diagnostics live in `tools/`; their potentially sensitive outputs belong in the ignored `diagnostics/` directory
 
 ## Integration Points
 
 **KML Structure:**
 - Root: `<Document>` with standard KML 2.2 namespace (no `gx:` extensions)
-- Folders group related placemarks (each timestamp/entry is a folder with circle/wedge + label placemark)
-- Coordinate format: `lon,lat,0` (6 decimal places ≈ 0.1m precision)
+- Default output uses one dataset folder and safely consolidates event components with `<MultiGeometry>`; legacy event folders remain optional
+- Shared document-level styles and compact anchor metadata reduce repeated KML content
+- Source coordinates preserve supplied precision; derived vertices/endpoints use 6 decimal places
 - Colors: AABBGGRR format (alpha, then BGR); transparency via `7d` prefix for shading, `4d` for GPS circles
 - Time animation: `<TimeSpan><begin>2025-01-15T14:30:00Z</begin><end>2025-01-15T15:00:00Z</end></TimeSpan>`
 - Band polygons use `<outline>0</outline>` to prevent outline doubling the fill color
 
 **Windows Integration:**
-- Taskbar grouping: `SetCurrentProcessExplicitAppUserModelID('opensource.locationvisualizer.1.1')`
+- Taskbar grouping: stable `SetCurrentProcessExplicitAppUserModelID('opensource.locationvisualizer')`
 - Explorer integration: `subprocess.Popen(['explorer', '/select,', file_path])`
 
 **User Workflows:**
@@ -160,7 +164,7 @@ Output: `dist/OS-LocationDataVisualizer.exe` (self-contained, ~50MB)
 2. User edits XLSX with their data
 3. Drag-drop or Browse → app auto-detects type → shows in status console
 4. Adjust visualization settings (colors, sector width, leg length) in tabs
-5. Click "Generate KML File" → progress bar, background thread → save dialog → opens in Google Earth
+5. Click "Generate Output Files" → progress bar, background thread → save dialog → writes KML, GeoJSON, and TXT siblings
 6. Status console shows warnings for missing data (⚠️)
 
 ## Code Style & Conventions
@@ -176,4 +180,4 @@ Output: `dist/OS-LocationDataVisualizer.exe` (self-contained, ~50MB)
 
 ---
 
-**Last Updated:** February 2026 | Based on v1.1 codebase analysis
+**Last Updated:** September 2026 | Based on v1.2 codebase analysis

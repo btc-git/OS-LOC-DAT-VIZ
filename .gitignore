@@ -6,11 +6,33 @@ __pycache__/
 .env
 .venv
 venv/
+.pytest_cache/
+.coverage
+htmlcov/
 
 # Build & Distribution
-build/
-dist/
+/build/
+/dist/
+/dist-updated/
 *.manifest
+*.exe
+*.zip
+node_modules/
+
+# Local Data & Generated Diagnostics
+# Root-level imports/exports may contain sensitive location records.
+/*.csv
+/*.xls
+/*.xlsx
+/*.kml
+/*.kmz
+/*.geojson
+/*.txt
+!/version_info.txt
+diagnostics/
+exports/
+local-data/
+outputs/
 
 # IDE
 .idea/

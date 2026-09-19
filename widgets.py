@@ -60,7 +60,7 @@ class DragDropWidget(QFrame):
             for url in urls:
                 if url.isLocalFile():
                     file_path = url.toLocalFile()
-                    if file_path.lower().endswith(('.csv', '.xlsx')):
+                    if file_path.lower().endswith(('.csv', '.xls', '.xlsx')):
                         event.acceptProposedAction()
                         self.setProperty("dragActive", True)
                         self.style().unpolish(self)
@@ -88,7 +88,7 @@ class DragDropWidget(QFrame):
             for url in urls:
                 if url.isLocalFile():
                     file_path = url.toLocalFile()
-                    if file_path.lower().endswith(('.csv', '.xlsx')):
+                    if file_path.lower().endswith(('.csv', '.xls', '.xlsx')):
                         self.file_dropped.emit(file_path)
                         event.acceptProposedAction()
                         return

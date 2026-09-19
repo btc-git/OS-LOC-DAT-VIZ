@@ -10,6 +10,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 
 from license_dialog import LicenseDialog
+from version import APP_VERSION
 
 # License Label
 class LicenseClickableLabel(QLabel):
@@ -60,30 +61,28 @@ class DisclaimerDialog(QDialog):
         content_layout = QVBoxLayout(content_widget)
 
         # Disclaimer
-        disclaimer_text = """
+        disclaimer_text = f"""
 <div style='font-family: "Segoe UI", Arial, sans-serif; line-height: 1.6; padding: 15px;'>
 
 <h3 style='color: #ff6b6b; margin-top: 0;'>🔴 CRITICAL DISCLAIMER</h3>
 <ul>
     <li><strong>Preliminary Visualization Only:</strong> This application is a triage tool for quick, initial review and visualization of location data. <span style='color: #ff6b6b;'><strong>All data and mapping must be independently verified by qualified experts before any formal or legal use.</strong></span></li>
-    <li><strong>No Coverage Estimations:</strong> All shaded areas, wedges, and circles are visual representations only - not coverage depictions. Maps show general directions and distances based on input data. The application does not parse or interpret any data, it simply creates a KML file from the data as provided.</li>
+    <li><strong>No Coverage Estimations:</strong> All shaded areas, wedges, and circles are visual representations only - not coverage depictions. The application transforms source data into preliminary KML visualizations using user-selected settings. It does not determine device location or RF coverage. All source values, assumptions, conversions, and generated geometry must be independently verified.</li>
 </ul>
 
 <h3 style='color: #00b894; margin-top: 25px;'>📝 Usage Overview</h3>
 <ol>
-    <li>Download a <strong>template file</strong> using the Templates button in the main window.</li>
-    <li>Copy and paste your data from your records into the matching columns in the template file and save it as your <strong>input file</strong>.</li>
-    <li>Drag and drop your input file into the program, or use the <strong>Browse for File</strong> button.</li>
-    <li>The program will automatically recognize the data type based on the column headers in your input file.</li>
-    <li>Adjust any visualization settings as needed and (optionally) add a label to describe the data.</li>
-    <li>Click <strong>Generate</strong> to create a KML file.</li>
-    <li>Open the KML file in <strong>Google Earth Pro</strong> (recommended — supports timeline playback, works offline if map areas were previously loaded), Google Earth Web, Google My Maps, or other GIS software.</li>
+    <li>Drag and drop a CSV or Excel file into the program, or use the <strong>Browse for File</strong> button. Standard template files are recognized automatically.</li>
+    <li>If the headers do not match a standard template, the mapping wizard opens automatically. Select the worksheet and header row, choose the record type, and verify each suggested column mapping.</li>
+    <li>Review the timezone, slash/dash date order, units, visualization settings, and optional label.</li>
+    <li>Click <strong>Generate</strong> to create same-named KML, GeoJSON, and TXT generation-log files.</li>
+    <li>Review the log’s settings, hashes, row outcomes, and warnings before opening the KML in Google Earth Pro or using the GeoJSON in another compatible GIS application.</li>
 </ol>
 
 <h3 style='color: #3dc1d3; margin-top: 25px;'>🎨 Visualization Details</h3>
 <ul>
     <li>If your data includes tower and sector information, the tool will draw a wedge shape to show the general direction. If no azimuth is provided, it will draw a circle. The default wedge is set to a 120° angle and a 1 mile shaded area, but this is for visualization only and does not reflect coverage.</li>
-    <li>If your data includes a distance from the tower, the tool will draw a band at that distance with configurable inner and outer thickness. This is a visual aid and not a precise measurement and does not indicate the device was at that exact distance.</li>
+    <li>If your data includes a distance from the tower, the tool will draw a band at that distance with configurable inner and outer thickness. This depicts the source-reported or inferred distance and any user-selected band extensions. It does not establish that the device was within the displayed area or at an exact distance from the tower.</li>
     <li>For location point data, the tool will draw a circle to represent the point and its accuracy, using either the provided accuracy or a default value of 100 meters.</li>
 </ul>
 
@@ -97,31 +96,32 @@ class DisclaimerDialog(QDialog):
             <li><strong>US (2-digit year):</strong> 07/30/24 13:00:20 (auto-converts: 00–30 → 2000–2030, 31–99 → 1931–1999)</li>
             <li><strong>European:</strong> 15.01.2025 14:30:00, 15.01.2025 14:30</li>
             <li><strong>Time-only:</strong> 14:30:00, 2:30 PM (uses today's date)</li>
-            <li><strong>Advanced:</strong> Excel serial dates (45696.7637037037), timestamps with timezone (EST, GMT, UTC auto-stripped), milliseconds auto-handled</li>
+            <li><strong>Advanced:</strong> Excel serial dates (45696.7637037037), timestamps with explicit timezone offsets converted to UTC, separate Date and Time columns, selectable slash/dash date order, milliseconds auto-handled</li>
         </ul>
     </li>
+    <li><strong>Timezone Review:</strong> Named timezones apply historical daylight-saving rules. Ambiguous or nonexistent transition times are omitted and identified in the status console rather than assigned an assumed instant.</li>
     <li>Distances and accuracy values can be provided in configurable units (Meters, Feet, Miles, or Kilometers). Azimuth in degrees (0°=N, 90°=E, 180°=S, 270°=W). Coordinates in decimal degrees (e.g., 40.724756, -74.222508).</li>
-    <li><strong>Google Earth Pro:</strong> Import generated KML files into Google Earth or compatible GIS software. Use the time slider in Google Earth Pro to view data over time.</li>
+    <li><strong>Viewing Outputs:</strong> Import generated KML files into Google Earth Pro or compatible GIS software, or use the paired GeoJSON in GeoLibre/MapLibre workflows. Use the available timeline controls to view data over time.</li>
 </ul>
 
 <h3 style='color: #4ecdc4; margin-top: 25px;'>🔒 Privacy & Security</h3>
 <ul>
-    <li>This tool runs completely offline and never connects to the internet. All data remains on your local machine.</li>
-    <li>Google Earth Pro can also be run offline for viewing generated KML files.</li>
+    <li>Location-data processing and export run locally; the application does not upload source or output files.</li>
+    <li>Generated KML, GeoJSON, and TXT logs can contain sensitive location information. Opening links or outputs in other applications is subject to those applications’ behavior.</li>
 </ul>
 
-<h3 style='color: #feca57; margin-top: 25px;'>� Troubleshooting</h3>
+<h3 style='color: #feca57; margin-top: 25px;'>Troubleshooting</h3>
 <ul>
     <li>If timestamps are not recognized, make sure they match one of the supported formats listed above.</li>
     <li>If you are working with a large dataset, this program may run slowly and the KML file may struggle to load in Google Earth Pro. Try processing a smaller subset of your data if you encounter problems.</li>
 </ul>
 
 <p style='text-align: center; margin-top: 30px; color: #666666; font-style: italic;'>
-Version 1.1<br/>
+Version {APP_VERSION}<br/>
 Open Source Location Data Visualization Tool<br/>
 <br/>
 <strong>📜 Open Source License:</strong> <a href="license://show" style="color:#4ecdc4; text-decoration:underline; cursor:pointer;">LICENSE</a> (GNU GPL v3.0)<br/>
-This software is free and open source. Any improvements must remain open source.<br/>
+This software is free and open source. Distribution and modification must comply with the license terms.<br/>
 <br/>
 <span style='color: #4ecdc4; font-size: 11pt;'>This is an open source project. Found a bug or have a suggestion? <br>Contribute or open an issue at <a href="https://github.com/btc-git/OS-LOC-DAT-VIZ" style="color:#4ecdc4; text-decoration:underline;">GitHub</a>.</span>
 </p>

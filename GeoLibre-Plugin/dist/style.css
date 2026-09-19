@@ -1,0 +1,661 @@
+/*
+ * Open Source Location Data Visualizer - github.com/btc-git/OS-LOC-DAT-VIZ
+ * Licensed under the GNU General Public License v3.0 - see LICENSE for details
+ */
+
+.osloc-v028 {
+  box-sizing: border-box;
+  padding: 11px;
+  font: 13px/1.35 system-ui, -apple-system, "Segoe UI", sans-serif
+}
+
+.osloc-v028 * {
+  box-sizing: border-box
+}
+
+.osloc-v028 button,
+.osloc-v028 select,
+.osloc-v028-timeline button,
+.osloc-v028-timeline select {
+  font: inherit;
+  color: inherit
+}
+
+.osloc-v028 button,
+.osloc-v028 select,
+.osloc-v028-timeline button,
+.osloc-v028-timeline select {
+  border: 1px solid rgba(127, 127, 127, .42);
+  border-radius: 6px;
+  background: transparent
+}
+
+.osloc-v028 button,
+.osloc-v028-timeline button {
+  padding: 6px 8px;
+  cursor: pointer
+}
+
+.osloc-v028 button:hover,
+.osloc-v028-timeline button:hover {
+  background: rgba(127, 127, 127, .12)
+}
+
+.osloc-v028 button:disabled,
+.osloc-v028-timeline button:disabled {
+  cursor: default;
+  opacity: .45
+}
+
+.osloc-v028__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px
+}
+
+.osloc-v028__summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 9px 0;
+  font-size: 12px
+}
+
+.osloc-v028__summary span {
+  opacity: .7
+}
+
+.osloc-v028__hint {
+  margin: 7px 0 10px;
+  font-size: 11px;
+  opacity: .7;
+  line-height: 1.45
+}
+
+.osloc-v028__empty,
+.osloc-v028__error {
+  padding: 11px;
+  border: 1px solid rgba(127, 127, 127, .3);
+  border-radius: 8px;
+  line-height: 1.45
+}
+
+.osloc-v028__datasets {
+  display: grid;
+  gap: 9px
+}
+
+.osloc-v028__dataset {
+  border: 1px solid rgba(127, 127, 127, .35);
+  border-radius: 8px;
+  overflow: hidden
+}
+
+.osloc-v028__dataset-head {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+  padding: 7px;
+  background: rgba(127, 127, 127, .07)
+}
+
+.osloc-v028__dataset-title {
+  display: grid;
+  gap: 1px;
+  text-align: left;
+  border: 0 !important;
+  padding: 0 !important;
+  background: transparent !important
+}
+
+.osloc-v028__dataset-title strong {
+  font-size: 13px
+}
+
+.osloc-v028__dataset-title span {
+  font-size: 11px;
+  opacity: .66
+}
+
+.osloc-v028__section {
+  border-top: 1px solid rgba(127, 127, 127, .18)
+}
+
+.osloc-v028__section-head {
+  width: 100%;
+  text-align: left;
+  border: 0 !important;
+  border-radius: 0 !important;
+  padding: 6px 8px !important;
+  background: rgba(127, 127, 127, .04) !important;
+  font-size: 11px;
+  font-weight: 700
+}
+
+.osloc-v028__events {
+  display: grid;
+  gap: 5px;
+  padding: 6px
+}
+
+.osloc-v028__event {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 6px;
+  padding: 7px;
+  border: 1px solid rgba(127, 127, 127, .28);
+  border-radius: 7px
+}
+
+.osloc-v028__event input {
+  margin-top: 5px
+}
+
+.osloc-v028__event-body {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  border: 0 !important;
+  padding: 0 !important;
+  background: transparent !important
+}
+
+.osloc-v028__event-body strong {
+  font-size: 13px
+}
+
+.osloc-v028__event-body span {
+  font-size: 11px;
+  opacity: .68
+}
+
+.osloc-v028__event-body .osloc-v028__local {
+  opacity: .86
+}
+
+.osloc-v028__event-body .osloc-v028__type {
+  opacity: .78;
+  font-weight: 650
+}
+
+.osloc-v028__event--active {
+  border-color: rgba(255, 255, 255, .42);
+  background: rgba(255, 255, 255, .045)
+}
+
+.osloc-v028__event--selected {
+  border-color: rgba(96, 165, 250, .9);
+  background: rgba(59, 130, 246, .14)
+}
+
+.osloc-v028__event--hidden {
+  opacity: .55
+}
+
+.osloc-v028__event-body:focus-visible,
+.osloc-v028__event input:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+  border-radius: 6px
+}
+
+.osloc-v028__diag {
+  margin-top: 10px;
+  font-size: 11px;
+  opacity: .68
+}
+
+.osloc-v028__diag div {
+  margin-top: 5px;
+  line-height: 1.4
+}
+
+/* Full-width bottom timeline across the map area */
+.osloc-v028-timeline {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  z-index: 50;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid rgba(127, 127, 127, .45);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, .95);
+  color: #111;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, .18);
+  font: 13px/1.25 system-ui, -apple-system, "Segoe UI", sans-serif;
+  backdrop-filter: blur(4px)
+}
+
+@media (prefers-color-scheme:dark) {
+  .osloc-v028-timeline {
+    background: rgba(32, 32, 32, .95);
+    color: #f2f2f2
+  }
+}
+
+.osloc-v028-timeline__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px
+}
+
+.osloc-v028-timeline__clock-wrap {
+  display: grid;
+  grid-template-columns: auto auto;
+  column-gap: 10px;
+  align-items: baseline;
+  min-width: 0
+}
+
+.osloc-v028-timeline__mode {
+  font-size: 11px;
+  font-weight: 800;
+  opacity: .65
+}
+
+.osloc-v028-timeline__clock {
+  font-size: 20px;
+  white-space: nowrap
+}
+
+.osloc-v028-timeline__utc {
+  grid-column: 1 / -1;
+  font-size: 10px;
+  opacity: .58
+}
+
+.osloc-v028-timeline__controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-wrap: wrap
+}
+
+.osloc-v028-timeline__play {
+  min-width: 64px;
+  font-weight: 700
+}
+
+.osloc-v028-timeline__speed {
+  display: flex;
+  align-items: center;
+  gap: 4px
+}
+
+.osloc-v028-timeline__speed select {
+  padding: 5px
+}
+
+.osloc-v028-timeline__slider-wrap {
+  margin-top: 7px
+}
+
+.osloc-v028-timeline__slider {
+  width: 100%;
+  margin: 0
+}
+
+.osloc-v028-timeline__labels {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 10px;
+  opacity: .65
+}
+
+@media (max-width:850px) {
+  .osloc-v028-timeline__top {
+    align-items: flex-start;
+    flex-direction: column
+  }
+
+  .osloc-v028-timeline__controls {
+    justify-content: flex-start
+  }
+
+  .osloc-v028-timeline__clock {
+    font-size: 18px
+  }
+}
+
+/* Event detail panel */
+.osloc-v028-details {
+  padding: 10px;
+  font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif
+}
+
+.osloc-v028-details h3 {
+  margin: 0 0 3px;
+  font-size: 16px
+}
+
+.osloc-v028-details h4 {
+  margin: 13px 0 5px;
+  font-size: 12px
+}
+
+.osloc-v028-details__dataset {
+  font-size: 11px;
+  opacity: .68;
+  margin-bottom: 10px
+}
+
+.osloc-v028-details dl {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 9px;
+  margin: 0
+}
+
+.osloc-v028-details dt {
+  font-weight: 700;
+  opacity: .76
+}
+
+.osloc-v028-details dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere
+}
+
+.osloc-v028-details__description {
+  white-space: pre-wrap;
+  border: 1px solid rgba(127, 127, 127, .28);
+  border-radius: 6px;
+  padding: 8px;
+  line-height: 1.45
+}
+
+.osloc-v028-details__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px
+}
+
+
+/* v0.0.9: native range dragging, isolated from map gestures */
+.osloc-v028-timeline {
+  pointer-events: auto;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.osloc-v028-timeline__slider-wrap {
+  padding: 5px 2px 4px;
+  touch-action: none;
+}
+
+.osloc-v028-timeline__slider {
+  width: 100%;
+  height: 28px;
+  margin: 0;
+  padding: 0;
+  cursor: pointer;
+  touch-action: none;
+}
+
+/* v0.0.11 evidence-focused cleanup */
+.osloc-v028__event-body .osloc-v028__type {
+  font-weight: 650;
+  opacity: .82;
+}
+
+.osloc-v028__event-body .osloc-v028__local {
+  opacity: .66;
+}
+
+.osloc-v028-details dl {
+  row-gap: 5px;
+}
+
+/* v0.0.12 time presentation */
+.osloc-v028__event-body>strong {
+  font-size: 14px;
+  letter-spacing: .01em;
+}
+
+.osloc-v028__record-time,
+.osloc-v028__corrected-time,
+.osloc-v028__duration {
+  font-size: 11px;
+}
+
+.osloc-v028__record-time {
+  opacity: .72;
+}
+
+.osloc-v028__corrected-time {
+  opacity: .9;
+  font-weight: 600;
+}
+
+.osloc-v028__duration {
+  opacity: .64;
+}
+
+/* v0.0.13 consistent original/adjusted time terminology */
+.osloc-v028__record-time {
+  opacity: .74;
+}
+
+.osloc-v028__timezone-offset {
+  opacity: .78;
+}
+
+.osloc-v028__duration {
+  opacity: .64;
+}
+
+/* v0.0.15 simplified guidance */
+.osloc-v028__hint {
+  display: grid;
+  gap: 2px;
+  margin: 7px 0 10px;
+  font-size: 11px;
+  line-height: 1.4;
+  opacity: .72;
+}
+
+/* v0.0.18 viewer-side display duration control */
+.osloc-v028__duration-control {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding-left: 2px;
+  font-size: 12px;
+}
+
+.osloc-v028__duration-control span {
+  opacity: .78;
+}
+
+.osloc-v028__duration-control select {
+  min-width: 78px;
+  padding: 6px 7px;
+}
+
+
+/* v0.0.19: match the Duration dropdown to GeoLibre's dark plugin theme */
+.osloc-v028__duration-control select {
+  color: #f3f4f6;
+  background: #171c26;
+  border-color: rgba(255, 255, 255, .24);
+  color-scheme: dark;
+}
+
+.osloc-v028__duration-control select:focus {
+  outline: 2px solid #3b82f6;
+  outline-offset: 1px;
+}
+
+.osloc-v028__duration-control select option {
+  color: #f3f4f6;
+  background: #171c26;
+}
+
+
+/* v0.0.20: keep all plugin-owned dropdowns consistent with GeoLibre dark mode */
+.osloc-v028 select,
+.osloc-v028-timeline select,
+.osloc-v028-details select {
+  color: #f3f4f6;
+  background: #171c26;
+  border-color: rgba(255, 255, 255, .24);
+  color-scheme: dark;
+}
+
+.osloc-v028 select option,
+.osloc-v028-timeline select option,
+.osloc-v028-details select option {
+  color: #f3f4f6;
+  background: #171c26;
+}
+
+.osloc-v028 select:focus,
+.osloc-v028-timeline select:focus,
+.osloc-v028-details select:focus {
+  outline: 2px solid #3b82f6;
+  outline-offset: 1px;
+}
+
+
+/* v0.0.21 event-details subtitle */
+.osloc-v028-details__dataset {
+  margin: 0 0 12px;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.35;
+  opacity: .72;
+}
+
+
+/* v0.0.22 simplified event hierarchy */
+.osloc-v028__section {
+  border-top: 1px solid rgba(127, 127, 127, .18);
+}
+
+.osloc-v028__section-label {
+  padding: 7px 10px 2px;
+  font-size: 11px;
+  font-weight: 700;
+  opacity: .72;
+}
+
+
+/* v0.0.24 map time-label toggle */
+.osloc-v028__labels-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 3px;
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.osloc-v028__labels-control input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+
+.osloc-v028__labels-control span {
+  opacity: .84;
+}
+
+
+/* v0.0.26 clearer map-time control */
+.osloc-v028__labels-control {
+  white-space: nowrap;
+}
+
+/* v0.0.33 inclusive event-date filtering */
+.osloc-v028__date-filter {
+  display: grid;
+  gap: 7px;
+  margin: 10px 0 6px;
+  padding: 9px 2px;
+  border-top: 1px solid rgba(127, 127, 127, .25);
+  border-bottom: 1px solid rgba(127, 127, 127, .25);
+}
+
+.osloc-v028__date-filter-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.osloc-v028__date-filter-head strong {
+  font-size: 12px;
+}
+
+.osloc-v028__date-filter-head span {
+  font-size: 11px;
+  opacity: .68;
+}
+
+.osloc-v028__date-filter-fields {
+  display: grid;
+  grid-template-columns: minmax(118px, 1fr) minmax(118px, 1fr) auto;
+  gap: 7px;
+  align-items: end;
+}
+
+.osloc-v028__date-filter-fields label {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  font-size: 11px;
+  opacity: .84;
+}
+
+.osloc-v028__date-filter-fields input[type="date"] {
+  width: 100%;
+  min-width: 0;
+  padding: 6px;
+  border: 1px solid rgba(255, 255, 255, .24);
+  border-radius: 5px;
+  color: #f3f4f6;
+  background: #171c26;
+  color-scheme: dark;
+  font: inherit;
+}
+
+.osloc-v028__date-filter-fields input[type="date"]:focus {
+  outline: 2px solid #3b82f6;
+  outline-offset: 1px;
+}
+
+.osloc-v028__date-filter-actions {
+  display: flex;
+  gap: 5px;
+}
+
+.osloc-v028__date-filter-actions button {
+  white-space: nowrap;
+}
+
+.osloc-v028__date-filter-empty {
+  padding: 11px;
+  border-top: 1px solid rgba(127, 127, 127, .18);
+  font-size: 11px;
+  opacity: .68;
+}
+
+@media (max-width: 430px) {
+  .osloc-v028__date-filter-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .osloc-v028__date-filter-actions {
+    grid-column: 1 / -1;
+  }
+}

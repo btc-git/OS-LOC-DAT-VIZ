@@ -7,14 +7,15 @@ import sys
 import os
 from PyQt6.QtWidgets import QApplication
 from main_window import MainWindow
+from version import APP_NAME, APP_USER_MODEL_ID, APP_VERSION
 
 
 def main():
     app = QApplication(sys.argv)
     
     # Set application properties
-    app.setApplicationName("Open Source Location Data Visualizer")
-    app.setApplicationVersion("1.1")
+    app.setApplicationName(APP_NAME)
+    app.setApplicationVersion(APP_VERSION)
     app.setOrganizationName("OpenSource")
     
     # Create and show main window
@@ -28,8 +29,7 @@ def main():
     if os.name == 'nt':  # Windows
         try:
             import ctypes
-            myappid = 'opensource.locationvisualizer.1.1'
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
         except:
             pass
     

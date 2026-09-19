@@ -4,8 +4,11 @@ Licensed under the GNU General Public License v3.0 - see LICENSE file for detail
 """
 
 import pandas as pd
+import hashlib
+import re
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from openpyxl import Workbook
 from openpyxl.styles import Font, numbers
@@ -18,8 +21,10 @@ from PyQt6.QtCore import Qt, QSettings
 from PyQt6.QtGui import QFont, QColor, QIcon, QPixmap, QPainter, QPen
 
 from dialogs import DisclaimerDialog
+from import_wizard import ImportWizardDialog
 from widgets import DragDropWidget
 from kml_generator import KMLGenerator
+from version import APP_VERSION
 
 
 class MainWindow(QMainWindow):
@@ -33,7 +38,17 @@ class MainWindow(QMainWindow):
         
         # Initialize variables
         self.data_file = None
+        self.imported_dataframe = None
+        self.import_metadata = None
+        self.import_target_timezone_name = None
+        self.import_target_offset_minutes = None
         self.kml_generator = None
+        self.generation_messages = []
+        self.current_generation_settings = {}
+        self.current_generation_type = None
+        self.current_generation_source_file = None
+        self.current_import_metadata = None
+        self.generation_started_utc = None
         self.settings = QSettings("OpenSource", "LocationDataVisualizer")
         
         # Set up UI
@@ -44,11 +59,10 @@ class MainWindow(QMainWindow):
         self.show_disclaimer_dialog()
         
         # Add welcome message
-        self.add_status_message("To get started, download a template file using the '📁 Templates' button.")
-        self.add_status_message("Replace the sample data in the template with your own data and save it as a CSV or XLSX file.")
-        self.add_status_message("Drag and drop your CSV or XLSX file, or click 'Browse for File', to load it into the visualizer.")
-        self.add_status_message("Adjust Settings and Colors as needed, then click 'Generate KML File' to create the KML.")
-        self.add_status_message("The KML file can be opened in Google Earth, Google My Maps, Google Earth Pro, or other kml-viewers.")
+        self.add_status_message("Drag and drop a CSV or Excel file, or click 'Browse for File', to begin.")
+        self.add_status_message("Standard templates are detected automatically; other files open the column-mapping wizard.")
+        self.add_status_message("Adjust settings and colors, then click 'Generate Output Files' to create KML and GeoJSON exports.")
+        self.add_status_message("Each generation includes same-named KML, GeoJSON, and TXT files for review.")
 
 
     
@@ -401,6 +415,59 @@ class MainWindow(QMainWindow):
         self.duration_spinbox.setValue(30)  # Default to 30 minutes
         viz_layout.addWidget(self.duration_spinbox, row, 1)
         row += 1
+
+        source_timezone_label = QLabel("Source Timestamp Timezone:")
+        source_timezone_label.setToolTip("Use a named timezone for automatic historical daylight-saving conversion")
+        viz_layout.addWidget(source_timezone_label, row, 0)
+        self.source_timezone_combo = QComboBox()
+        self.source_timezone_combo.addItem("Fixed UTC offset", None)
+        self.source_timezone_combo.addItem("US Eastern (America/New_York)", "America/New_York")
+        self.source_timezone_combo.addItem("US Central (America/Chicago)", "America/Chicago")
+        self.source_timezone_combo.addItem("US Mountain (America/Denver)", "America/Denver")
+        self.source_timezone_combo.addItem("Arizona (America/Phoenix)", "America/Phoenix")
+        self.source_timezone_combo.addItem("US Pacific (America/Los_Angeles)", "America/Los_Angeles")
+        self.source_timezone_combo.addItem("Alaska (America/Anchorage)", "America/Anchorage")
+        self.source_timezone_combo.addItem("Hawaii (Pacific/Honolulu)", "Pacific/Honolulu")
+        viz_layout.addWidget(self.source_timezone_combo, row, 1)
+        row += 1
+
+        source_offset_label = QLabel("Source Timestamp UTC Offset:")
+        source_offset_label.setToolTip("Fallback offset for timestamps without timezone information; explicit offsets in the data take precedence")
+        viz_layout.addWidget(source_offset_label, row, 0)
+        self.source_utc_offset_combo = QComboBox()
+        utc_offsets = [
+            (-720, "UTC -12:00"), (-660, "UTC -11:00"), (-600, "UTC -10:00"),
+            (-570, "UTC -09:30"), (-540, "UTC -09:00 (AKST)"), (-480, "UTC -08:00 (PST)"),
+            (-420, "UTC -07:00 (MST / PDT)"), (-360, "UTC -06:00 (CST / MDT)"),
+            (-300, "UTC -05:00 (EST / CDT)"), (-240, "UTC -04:00 (EDT / AST)"),
+            (-210, "UTC -03:30"), (-180, "UTC -03:00"),
+            (-120, "UTC -02:00"), (-60, "UTC -01:00"), (0, "UTC +00:00"),
+            (60, "UTC +01:00"), (120, "UTC +02:00"), (180, "UTC +03:00"),
+            (210, "UTC +03:30"), (240, "UTC +04:00"), (270, "UTC +04:30"),
+            (300, "UTC +05:00"), (330, "UTC +05:30"), (345, "UTC +05:45"),
+            (360, "UTC +06:00"), (390, "UTC +06:30"), (420, "UTC +07:00"),
+            (480, "UTC +08:00"), (525, "UTC +08:45"), (540, "UTC +09:00"),
+            (570, "UTC +09:30"), (600, "UTC +10:00"), (630, "UTC +10:30"),
+            (660, "UTC +11:00"), (720, "UTC +12:00"), (765, "UTC +12:45"),
+            (780, "UTC +13:00"), (825, "UTC +13:45"), (840, "UTC +14:00"),
+        ]
+        for offset_minutes, label in utc_offsets:
+            self.source_utc_offset_combo.addItem(label, offset_minutes)
+        self.source_utc_offset_combo.setCurrentIndex(self.source_utc_offset_combo.findData(0))
+        viz_layout.addWidget(self.source_utc_offset_combo, row, 1)
+        self.source_timezone_combo.currentIndexChanged.connect(
+            lambda: self.source_utc_offset_combo.setEnabled(self.source_timezone_combo.currentData() is None)
+        )
+        row += 1
+
+        date_order_label = QLabel("Slash/Dash Date Order:")
+        date_order_label.setToolTip("Controls ambiguous numeric dates such as 04/10/2019 or 04-10-2019; ISO year-first dates are unaffected")
+        viz_layout.addWidget(date_order_label, row, 0)
+        self.source_date_order_combo = QComboBox()
+        self.source_date_order_combo.addItem("Month/Day/Year (MM/DD/YYYY or MM-DD-YYYY)", "MDY")
+        self.source_date_order_combo.addItem("Day/Month/Year (DD/MM/YYYY or DD-MM-YYYY)", "DMY")
+        viz_layout.addWidget(self.source_date_order_combo, row, 1)
+        row += 1
         
         # Add stretch to push controls to top and provide breathing room
         viz_layout.setRowStretch(row, 1)
@@ -457,6 +524,13 @@ class MainWindow(QMainWindow):
         color_layout.setRowStretch(4, 1)
         
         tab_widget.addTab(color_tab, "Colors")
+
+        self.import_records_button = QPushButton("Import Records...")
+        self.import_records_button.setToolTip(
+            "Manually map and import source records using the same workflow used for non-template files"
+        )
+        self.import_records_button.clicked.connect(self.open_import_records_dialog)
+        tab_widget.setCornerWidget(self.import_records_button, Qt.Corner.TopRightCorner)
         
         # Set maximum height for tab widget to prevent excessive space
         tab_widget.setMaximumHeight(320)
@@ -469,7 +543,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.progress_bar, 0)  # No stretch for progress bar
         
         # Generate button
-        self.generate_button = QPushButton("Generate KML File")
+        self.generate_button = QPushButton("Generate Output Files")
         self.generate_button.clicked.connect(self.generate_kml)
         self.generate_button.setEnabled(False)
         self.generate_button.setMinimumHeight(30)
@@ -513,7 +587,7 @@ class MainWindow(QMainWindow):
         # Footer with version info (clickable links)
         footer_layout = QHBoxLayout()
         footer_layout.setContentsMargins(0, 2, 0, 2)  # Minimal top and bottom margins
-        version_label = QLabel('v1.1 | <a href="https://github.com/btc-git/OS-LOC-DAT-VIZ" style="color: #4ecdc4; text-decoration: none;">Open Source Location Data Visualizer</a> | <a href="license://show" style="color: #4ecdc4; text-decoration: none;">GPL v3.0</a>')
+        version_label = QLabel(f'v{APP_VERSION} | <a href="https://github.com/btc-git/OS-LOC-DAT-VIZ" style="color: #4ecdc4; text-decoration: none;">Open Source Location Data Visualizer</a> | <a href="license://show" style="color: #4ecdc4; text-decoration: none;">GPL v3.0</a>')
         version_label.setStyleSheet("color: #666666; font-size: 10px; font-style: italic;")
         version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         version_label.linkActivated.connect(self.handle_footer_link)
@@ -653,11 +727,82 @@ class MainWindow(QMainWindow):
             self, 
             "Select Input File", 
             "", 
-            "CSV or XLSX (*.csv *.xlsx);;All Files (*)"
+            "CSV or Excel (*.csv *.xls *.xlsx);;All Files (*)"
         )
         
         if file_path:
             self.handle_file_selection(file_path)
+
+    def show_import_wizard(self, file_path=None):
+        """Open the advanced source-record import and mapping workflow."""
+        dialog = ImportWizardDialog(self)
+        if file_path:
+            dialog.load_file(file_path)
+        if not dialog.exec():
+            return False
+
+        self.data_file = dialog.source_path
+        self.imported_dataframe = dialog.normalized_dataframe
+        self.import_target_timezone_name = dialog.selected_target_timezone_name
+        self.import_target_offset_minutes = dialog.selected_target_offset_minutes
+        self.import_metadata = {
+            'worksheet': dialog.selected_sheet_name,
+            'header_row': dialog.selected_header_row,
+            'mappings': dialog.selected_mappings,
+            'date_time_filter': dialog.selected_filter_metadata,
+        }
+        filename = Path(self.data_file).name
+        self.custom_label_input.clear()
+
+        if dialog.selected_data_type == "Tower/Sector":
+            self.tower_radio.setChecked(True)
+            selected_radio = self.tower_radio
+        elif dialog.selected_data_type == "Distance from Tower":
+            self.ta_radio.setChecked(True)
+            selected_radio = self.ta_radio
+        else:
+            self.gps_radio.setChecked(True)
+            selected_radio = self.gps_radio
+
+        for radio in (self.tower_radio, self.ta_radio, self.gps_radio):
+            radio.setEnabled(radio is selected_radio)
+
+        timezone_index = self.source_timezone_combo.findData(dialog.selected_source_timezone_name)
+        self.source_timezone_combo.setCurrentIndex(max(timezone_index, 0))
+        offset_index = self.source_utc_offset_combo.findData(dialog.selected_source_offset_minutes)
+        if offset_index >= 0:
+            self.source_utc_offset_combo.setCurrentIndex(offset_index)
+        date_order_index = self.source_date_order_combo.findData(dialog.selected_date_order)
+        self.source_date_order_combo.setCurrentIndex(max(date_order_index, 0))
+
+        self.generate_button.setEnabled(True)
+        self.file_label.setText(f"✅ Imported: {filename}")
+        self.file_label.setStyleSheet("color: #00ff00; font-weight: bold;")
+        self.drag_drop_widget.drop_label.setText(f"📁 Imported: {filename}\n\nReady to generate output files")
+        self.add_status_message(
+            f"✅ Imported {len(self.imported_dataframe)} rows as {dialog.selected_data_type} data"
+        )
+        filter_metadata = dialog.selected_filter_metadata
+        if filter_metadata.get('enabled'):
+            self.add_status_message(
+                f"📅 Date/time filter retained {filter_metadata['retained_rows']} of "
+                f"{filter_metadata['input_rows']} rows; {filter_metadata['excluded_rows']} excluded"
+            )
+            if filter_metadata.get('invalid_coordinate_rows'):
+                self.add_status_message(
+                    f"⚠️ {filter_metadata['invalid_coordinate_rows']} retained rows have missing or "
+                    "invalid mapped coordinates and cannot produce geometry"
+                )
+            if filter_metadata.get('unparseable_rows'):
+                self.add_status_message(
+                    f"⚠️ Date/time filter excluded {filter_metadata['unparseable_rows']} rows "
+                    "whose timestamps could not be parsed or uniquely resolved"
+                )
+        return True
+
+    def open_import_records_dialog(self):
+        """Manual entry point to the existing import wizard workflow."""
+        self.show_import_wizard()
     
     def handle_file_dropped(self, file_path):
         """Handle file dropped via drag and drop"""
@@ -666,6 +811,10 @@ class MainWindow(QMainWindow):
     def handle_file_selection(self, file_path):
         """Handler for file selection (both browse and drag-drop)"""
         self.data_file = file_path
+        self.imported_dataframe = None
+        self.import_metadata = None
+        self.import_target_timezone_name = None
+        self.import_target_offset_minutes = None
         filename = Path(file_path).name
         
         # Clear custom label field for new file
@@ -684,7 +833,17 @@ class MainWindow(QMainWindow):
         try:
             # Read file based on extension (with Excel date handling)
             file_extension = Path(file_path).suffix.lower()
-            if file_extension == '.xlsx':
+            if file_extension == '.xls':
+                self.add_status_message("📊 Legacy Excel file detected - opening column mapping wizard")
+                if self.show_import_wizard(file_path):
+                    return
+                self.generate_button.setEnabled(False)
+                self.file_label.setText(f"⚠️ {filename} (Mapping Required)")
+                self.file_label.setStyleSheet("color: #ff6666; font-weight: bold;")
+                self.drag_drop_widget.drop_label.setText(f"⚠️ Mapping Required: {filename}\n\nDrop or browse again to reopen the wizard")
+                self.add_status_message("⚠️ Column mapping was cancelled; no data is ready for generation")
+                return
+            elif file_extension == '.xlsx':
                 df = pd.read_excel(file_path, nrows=1, engine='openpyxl')
                 self.add_status_message("📊 Reading Excel file...")
             elif file_extension == '.csv':
@@ -693,14 +852,15 @@ class MainWindow(QMainWindow):
             else:
                 raise ValueError(f"Unsupported file format: {file_extension}. Please use .csv or .xlsx files.")
             
-            columns = [col.lower().strip() for col in df.columns]
+            columns = [re.sub(r'[^a-z0-9]+', ' ', str(col).lower()).strip() for col in df.columns]
             detected_type = None
+            has_timestamp = 'timestamp' in columns
             
             # Check for exact template matches
             # Distance from Tower Template: Timestamp, Latitude, Longitude, Azimuth, Distance
             if (any(col in ['latitude', 'lat'] for col in columns) and
                 any(col in ['longitude', 'lon', 'long'] for col in columns) and
-                any(col in ['timestamp', 'date & time', 'datetime', 'time'] for col in columns) and
+                has_timestamp and
                 any(col in ['azimuth', 'bearing', 'direction'] for col in columns) and
                 any(col in ['distance', 'range', 'distance (m)', 'distance (meters)'] for col in columns)):
                 detected_type = "distance_from_tower"
@@ -710,7 +870,7 @@ class MainWindow(QMainWindow):
             # Tower/Sector Template: Latitude, Longitude, Timestamp, Azimuth
             elif (any(col in ['latitude', 'lat'] for col in columns) and
                   any(col in ['longitude', 'lon', 'long'] for col in columns) and
-                  any(col in ['timestamp', 'date & time', 'datetime', 'time'] for col in columns) and
+                  has_timestamp and
                   any(col in ['azimuth', 'bearing', 'direction'] for col in columns) and
                   not any(col in ['distance', 'range', 'distance (m)', 'distance (meters)'] for col in columns)):
                 detected_type = "cell_tower"
@@ -720,7 +880,7 @@ class MainWindow(QMainWindow):
             # Location Point Template: Latitude, Longitude, Timestamp, (optional) Accuracy
             elif (any(col in ['latitude', 'lat'] for col in columns) and
                   any(col in ['longitude', 'lon', 'long'] for col in columns) and
-                  any(col in ['timestamp', 'date & time', 'datetime', 'time'] for col in columns) and
+                  has_timestamp and
                   not any(col in ['azimuth', 'bearing', 'direction'] for col in columns)):
                 detected_type = "gps"
                 self.gps_radio.setChecked(True)
@@ -749,13 +909,16 @@ class MainWindow(QMainWindow):
                     self.ta_radio.setEnabled(False)
                     self.gps_radio.setEnabled(True)
             else:
-                # Invalid format - disable generation and show error
+                self.add_status_message("⚠️ Headers do not match a standard template - opening column mapping wizard")
+                if self.show_import_wizard(file_path):
+                    return
+
+                # Mapping cancelled - disable generation and show error
                 self.generate_button.setEnabled(False)
-                self.file_label.setText(f"❌ {filename} (Invalid Format)")
+                self.file_label.setText(f"⚠️ {filename} (Mapping Required)")
                 self.file_label.setStyleSheet("color: #ff6666; font-weight: bold;")
-                self.drag_drop_widget.drop_label.setText(f"❌ Invalid Format: {filename}\n\nUse Templates button to download correct format")
-                self.add_status_message("❌ Column headers don't match any template format")
-                self.add_status_message("💡 Click 'Templates' button to download correct CSV format")
+                self.drag_drop_widget.drop_label.setText(f"⚠️ Mapping Required: {filename}\n\nDrop or browse again to reopen the wizard")
+                self.add_status_message("⚠️ Column mapping was cancelled; no data is ready for generation")
                 
                 # Disable all radio buttons for invalid files
                 self.tower_radio.setEnabled(False)
@@ -852,7 +1015,10 @@ class MainWindow(QMainWindow):
             self.add_status_message(f"⚠️ Error opening file location: {str(e)}")
     
     def generate_kml(self):
-        """Generate KML file in background thread"""
+        """Generate output files in background thread"""
+        if self.kml_generator and self.kml_generator.isRunning():
+            QMessageBox.warning(self, "Generation in Progress", "Wait for the current output generation to finish.")
+            return
         if not self.data_file:
             QMessageBox.warning(self, "Warning", "Please select an input file first.")
             return
@@ -883,6 +1049,11 @@ class MainWindow(QMainWindow):
             'default_accuracy': self.default_accuracy_spinbox.value(),
             'enable_time_animation': True,  # Always enabled
             'duration_minutes': self.duration_spinbox.value(),
+            'source_utc_offset_minutes': self.source_utc_offset_combo.currentData(),
+            'source_timezone_name': self.source_timezone_combo.currentData(),
+            'target_utc_offset_minutes': self.import_target_offset_minutes,
+            'target_timezone_name': self.import_target_timezone_name,
+            'source_date_order': self.source_date_order_combo.currentData(),
             'custom_label': self.custom_label_input.text().strip() or None
         }
         
@@ -891,23 +1062,51 @@ class MainWindow(QMainWindow):
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
         
-        self.add_status_message(f"Starting KML generation for {data_type} data...")
+        self.add_status_message(f"Starting KML and GeoJSON generation for {data_type} data...")
+        self.generation_messages = []
+        self.current_generation_settings = settings.copy()
+        self.current_generation_type = data_type
+        self.current_generation_source_file = self.data_file
+        self.current_import_metadata = None
+        if self.import_metadata:
+            self.current_import_metadata = {
+                'worksheet': self.import_metadata.get('worksheet'),
+                'header_row': self.import_metadata.get('header_row'),
+                'mappings': dict(self.import_metadata.get('mappings', {})),
+                'date_time_filter': dict(self.import_metadata.get('date_time_filter', {})),
+            }
+        self.generation_started_utc = datetime.now(timezone.utc)
         
         # Create and start worker thread
-        self.kml_generator = KMLGenerator(self.data_file, data_type, settings)
+        self.kml_generator = KMLGenerator(
+            self.data_file, data_type, settings, dataframe=self.imported_dataframe
+        )
         self.kml_generator.progress.connect(self.progress_bar.setValue)
         self.kml_generator.finished.connect(self.on_generation_finished)
         self.kml_generator.error.connect(self.on_generation_error)
-        self.kml_generator.status_message.connect(self.add_status_message)
+        self.kml_generator.status_message.connect(self.handle_generation_status)
         self.kml_generator.start()
+
+    def handle_generation_status(self, message):
+        """Display and retain messages produced by the active generation run."""
+        self.generation_messages.append(message)
+        self.add_status_message(message)
     
-    def on_generation_finished(self, kml_content):
-        """Handle successful KML generation"""
+    def on_generation_finished(self, output_payload):
+        """Handle successful KML/GeoJSON generation"""
         self.progress_bar.setVisible(False)
         self.generate_button.setEnabled(True)
+
+        if isinstance(output_payload, dict):
+            kml_content = output_payload.get('kml', '')
+            geojson_content = output_payload.get('geojson', '')
+        else:
+            # Backward compatibility with older worker payload.
+            kml_content = output_payload or ''
+            geojson_content = ''
         
         # Show file save dialog
-        base_name = Path(self.data_file).stem
+        base_name = Path(self.current_generation_source_file).stem
         
         # Use custom label for filename if provided, otherwise use base name
         custom_label = self.custom_label_input.text().strip()
@@ -919,34 +1118,175 @@ class MainWindow(QMainWindow):
         else:
             suggested_filename = f"{base_name}_visualization.kml"
             
-        start_dir = str(Path(self.data_file).parent / suggested_filename)
+        start_dir = str(Path(self.current_generation_source_file).parent / suggested_filename)
         
         output_file, _ = QFileDialog.getSaveFileName(
             self,
-            "Save KML File",
+            "Save Output Files",
             start_dir,
             "KML Files (*.kml);;All Files (*)"
         )
         
         if output_file:
             try:
-                # Save KML content to file
-                with open(output_file, "w", encoding="utf-8") as f:
-                    f.write(kml_content)
-                
-                self.add_status_message(f"✅ KML file saved successfully: {Path(output_file).name}")
-                
-                # Open file location and highlight file
-                self.open_file_location(output_file)
+                output_path, geojson_path = self.write_visualization_outputs(
+                    output_file, kml_content, geojson_content
+                )
+                self.add_status_message(
+                    f"✅ KML file saved successfully: {output_path.name}"
+                )
+                self.add_status_message(
+                    f"✅ GeoJSON file saved successfully: {geojson_path.name}"
+                )
             except Exception as e:
                 self.add_status_message(f"❌ Error saving file: {str(e)}")
                 QMessageBox.critical(
                     self,
                     "Save Error",
-                    f"Failed to save KML file:\n\n{str(e)}"
+                    f"Failed to save output file(s):\n\n{str(e)}"
                 )
+                return
+
+            log_path = Path(output_file).with_suffix('.txt')
+            try:
+                log_path.write_text(self.build_generation_log(output_file), encoding='utf-8')
+                self.add_status_message(f"✅ Generation log saved: {log_path.name}")
+            except Exception as e:
+                self.add_status_message(f"⚠️ Output files were saved, but the generation log could not be saved: {str(e)}")
+                QMessageBox.warning(
+                    self,
+                    "Log Save Warning",
+                    f"The output files were saved, but their generation log could not be saved:\n\n{str(e)}"
+                )
+
+            # Open file location and highlight file
+            self.open_file_location(output_file)
         else:
             self.add_status_message("⚠️ File save cancelled by user")
+
+    @staticmethod
+    def write_visualization_outputs(output_file, kml_content, geojson_content):
+        """Write the required KML and GeoJSON siblings for one generation."""
+        if not kml_content:
+            raise ValueError("Generated KML content is empty")
+        if not geojson_content:
+            raise ValueError("Generated GeoJSON content is empty")
+
+        output_path = Path(output_file)
+        geojson_path = output_path.with_suffix('.geojson')
+        output_path.write_text(kml_content, encoding='utf-8')
+        geojson_path.write_text(geojson_content, encoding='utf-8')
+        return output_path, geojson_path
+
+    @staticmethod
+    def calculate_file_sha256(file_path):
+        """Calculate a SHA-256 digest without loading the entire file into memory."""
+        digest = hashlib.sha256()
+        with open(file_path, 'rb') as file_handle:
+            for chunk in iter(lambda: file_handle.read(1024 * 1024), b''):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    def build_generation_log(self, output_file):
+        """Create the human-readable audit log for the completed generation."""
+        output_path = Path(output_file)
+        geojson_path = output_path.with_suffix('.geojson')
+        source_path = Path(self.current_generation_source_file)
+        source_hash = self.calculate_file_sha256(source_path)
+        output_hash = self.calculate_file_sha256(output_path)
+        geojson_hash = self.calculate_file_sha256(geojson_path) if geojson_path.exists() else 'Not generated'
+        completed_utc = datetime.now(timezone.utc)
+        settings = self.current_generation_settings
+        summary = self.kml_generator.audit_summary if self.kml_generator else {}
+
+        timezone_value = settings.get('source_timezone_name')
+        if timezone_value:
+            timezone_description = timezone_value
+        else:
+            offset_minutes = int(settings.get('source_utc_offset_minutes', 0))
+            sign = '+' if offset_minutes >= 0 else '-'
+            hours, minutes = divmod(abs(offset_minutes), 60)
+            timezone_description = f"Fixed UTC {sign}{hours:02d}:{minutes:02d}"
+
+        lines = [
+            "Open Source Location Data Visualizer - Generation Log",
+            "All outputs are preliminary and require independent expert review.",
+            "",
+            f"Application version: {APP_VERSION}",
+            f"Generation started (UTC): {self.generation_started_utc.isoformat() if self.generation_started_utc else 'Unknown'}",
+            f"Generation completed (UTC): {completed_utc.isoformat()}",
+            f"Source file: {source_path.name}",
+            f"Source SHA-256: {source_hash}",
+            f"Output KML: {output_path.name}",
+            f"Output KML SHA-256: {output_hash}",
+            f"Output GeoJSON: {geojson_path.name if geojson_path.exists() else 'Not generated'}",
+            f"Output GeoJSON SHA-256: {geojson_hash}",
+            f"Input workflow: {'Import Wizard' if self.current_import_metadata else 'Template/direct file'}",
+            f"Record type: {self.current_generation_type}",
+            "",
+            "Timestamp interpretation",
+            f"Timezone: {timezone_description}",
+            f"Slash/dash date order: {settings.get('source_date_order', 'MDY')}",
+            f"Animation duration (minutes): {settings.get('duration_minutes', 30)}",
+        ]
+
+        if self.current_import_metadata:
+            lines.extend([
+                "",
+                "Import mapping",
+                f"Worksheet: {self.current_import_metadata.get('worksheet') or 'Not applicable'}",
+                f"Header row: {self.current_import_metadata.get('header_row')}",
+            ])
+            for target_field, source_column in self.current_import_metadata.get('mappings', {}).items():
+                lines.append(f"{target_field}: {source_column}")
+            filter_metadata = self.current_import_metadata.get('date_time_filter', {})
+            if filter_metadata.get('enabled'):
+                lines.extend([
+                    "",
+                    "Import date/time filter",
+                    f"Boundary mode: {'Exact date/time' if filter_metadata.get('exact_times') else 'Whole days'}",
+                    f"Source range (inclusive): {filter_metadata.get('start_source')} through {filter_metadata.get('end_source')}",
+                    f"UTC range (inclusive): {filter_metadata.get('start_utc')} through {filter_metadata.get('end_utc')}",
+                    f"Rows before filter: {filter_metadata.get('input_rows')}",
+                    f"Rows retained: {filter_metadata.get('retained_rows')}",
+                    f"Rows excluded: {filter_metadata.get('excluded_rows')}",
+                    f"Rows excluded with unparseable or unresolved timestamps: {filter_metadata.get('unparseable_rows')}",
+                    f"Retained rows with valid mapped coordinates: {filter_metadata.get('valid_coordinate_rows')}",
+                    f"Retained rows with missing or invalid mapped coordinates: {filter_metadata.get('invalid_coordinate_rows')}",
+                ])
+
+        lines.extend([
+            "",
+            "Visualization settings",
+            f"Leg length (miles): {settings.get('leg_length')}",
+            f"Shaded area length (miles): {settings.get('shaded_area_length')}",
+            f"Sector width (degrees): {settings.get('azimuth_spread')}",
+            f"Distance units: {settings.get('ta_distance_units')}",
+            f"Inner band extension: {settings.get('band_thickness_before')} {settings.get('band_thickness_units')}",
+            f"Outer band extension: {settings.get('band_thickness')} {settings.get('band_thickness_units')}",
+            f"Location accuracy units: {settings.get('gps_units')}",
+            f"Default location accuracy: {settings.get('default_accuracy')} {settings.get('gps_units')}",
+            f"Leg color (KML AABBGGRR): {settings.get('leg_color')}",
+            f"Shaded area color (KML AABBGGRR): {settings.get('shaded_color')}",
+            f"Distance band color (KML AABBGGRR): {settings.get('band_color')}",
+            f"Location point color (KML AABBGGRR): {settings.get('gps_color')}",
+            f"Custom label: {settings.get('custom_label') or 'None'}",
+            "",
+            "Row outcomes",
+            f"Input rows: {summary.get('input_rows', 'Unknown')}",
+            f"Generated rows: {summary.get('generated_rows', 'Unknown')}",
+            f"Skipped - invalid coordinates: {summary.get('skipped_invalid_coordinates', 'Unknown')}",
+            f"Skipped - missing timestamp: {summary.get('skipped_missing_timestamp', 'Unknown')}",
+            f"Skipped - DST conflict: {summary.get('skipped_dst_conflict', 'Unknown')}",
+            "",
+            "Generation warnings",
+        ])
+        if self.generation_messages:
+            lines.extend(self.generation_messages)
+        else:
+            lines.append("None")
+
+        return "\n".join(lines) + "\n"
     
     def on_generation_error(self, error_message):
         """Handle KML generation error"""
@@ -958,7 +1298,7 @@ class MainWindow(QMainWindow):
         QMessageBox.critical(
             self, 
             "Error", 
-            f"Failed to generate KML file:\n\n{error_message}"
+            f"Failed to generate output file(s):\n\n{error_message}"
         )
     
     def show_template_menu(self):

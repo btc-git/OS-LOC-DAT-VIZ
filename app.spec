@@ -1,12 +1,19 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from PyInstaller.utils.hooks import collect_all, collect_data_files
+
+xlrd_datas, xlrd_binaries, xlrd_hiddenimports = collect_all('xlrd')
+if not xlrd_hiddenimports:
+    raise RuntimeError(
+        "xlrd is required to build XLS support. Install requirements with the Python interpreter running PyInstaller."
+    )
 
 a = Analysis(
     ['app.py'],
     pathex=[],
-    binaries=[],
-    datas=[('LICENSE', '.')],
-    hiddenimports=[],
+    binaries=xlrd_binaries,
+    datas=[('LICENSE', '.')] + collect_data_files('tzdata') + xlrd_datas,
+    hiddenimports=xlrd_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -35,4 +42,5 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon='wifi_icon.ico',
+    version='version_info.txt',
 )

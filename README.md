@@ -5,7 +5,7 @@ This application was developed with AI assistance and has undergone human review
 
 ---
 
-A standalone desktop application for **quick triage and initial visualization** of location data. This tool converts data containing tower/sector, distance from tower, and location point information into KML files for preliminary analysis.
+A standalone desktop application for **quick triage and initial visualization** of location data. This tool converts data containing tower/sector, distance from tower, and location point information into paired KML and GeoJSON files for preliminary analysis.
 
 ⚠️ **IMPORTANT: This is for initial review only. All findings must be analyzed and verified.**
 
@@ -30,10 +30,22 @@ A standalone desktop application for **quick triage and initial visualization** 
 - Configurable unit support (Meters, Feet, Miles, Kilometers)
 - Time animation support for chronological display
 
+### **Output & Interoperability**
+
+- Paired KML and GeoJSON exports with matching event and dataset metadata
+- KML output for Google Earth Pro and compatible GIS software
+- GeoJSON output optimized for GeoLibre/MapLibre workflows
+- Included [GeoLibre viewer plugin](GeoLibre-Plugin/README.md) for filtering, timeline playback, labels, and event details
+- Same-named TXT generation log with source/output hashes, settings, row outcomes, and warnings
+
 ### 🖥️ **User-Friendly Interface**
 
-- Drag-and-drop file input
+- Drag-and-drop CSV, XLS, and XLSX input
 - Built-in sample XLSX templates for proper formatting
+- Automatic column-mapping wizard for files that do not match a standard template
+- Optional inclusive date/time range filtering during import
+- Named timezone and fixed UTC-offset handling
+- Human-readable TXT generation log with hashes, settings, row outcomes, and warnings
 
 ## Application Screenshot
 
@@ -43,13 +55,16 @@ A standalone desktop application for **quick triage and initial visualization** 
 
 ## How to Use
 
-1. Download a **template file** using the Templates button in the program.
-2. Copy and paste your data from your records into the matching columns in the template file and save it as your **input file**.
-3. Drag and drop your input file into the program, or use the Browse for File button.
-4. The program will automatically recognize the data type based on the column headers in your input file.
-5. Adjust any visualization settings as needed and (optionally) add a label to describe the data.
-6. Click Generate to create a KML file.
-7. Open the KML file in **Google Earth Pro** (recommended — supports timeline playback, works offline if map areas were previously loaded), Google Earth Web, Google My Maps, or other GIS software.
+1. Drag and drop a CSV or Excel file into the program, or use the Browse for File button.
+2. A file using the application’s standard template headers is recognized automatically.
+3. For other files, the column-mapping wizard opens automatically. Select the worksheet and header row, choose the record type, review the suggested mappings, and optionally limit the import to an inclusive date/time range.
+4. Review the timezone, slash/dash date order, units, and visualization settings.
+5. Click Generate to create same-named KML, GeoJSON, and TXT generation-log files.
+6. Review warnings and row outcomes in the TXT log, then open the KML in **Google Earth Pro** or use the GeoJSON in **GeoLibre** or another compatible GIS application.
+
+Each generation writes a `.kml`, `.geojson`, and `.txt` file with the same base name. The log records source and output SHA-256 hashes, import mappings, timestamp interpretation, visualization settings, row outcomes, and warnings without copying source-record contents.
+
+For original carrier records that do not match a template, the import wizard opens automatically. It supports CSV, XLS, and XLSX files; worksheet and header-row selection; record-type selection; explicit column mapping; and optional inclusive date/time range filtering. Date selections include the complete start and end days by default; select **Use exact times** for narrower boundaries. **Check Matching Rows** reports both timestamp matches and rows with valid mapped coordinates before import. The filter uses the selected timezone interpretation, excludes timestamps that cannot be parsed or uniquely resolved, and records all filter counts and boundaries in the TXT generation log. Its live preview shows the first 25 source rows with each original column header and the application field currently mapped to it. Azimuth may be left unmapped when it is unavailable; the application will use a 360-degree visualization. Imported records are normalized in memory and the original file is not modified.
 
 ### Data Format Reference
 
@@ -61,6 +76,8 @@ A standalone desktop application for **quick triage and initial visualization** 
 
 **For Location Point Data:**
 - `Timestamp`, `Latitude`, `Longitude`, `Accuracy` (optional)
+
+The templates use one combined `Timestamp` column, which is recommended. Input files may instead use separate `Date` and `Time` columns, including common variants such as `Conn. Date` and `Conn. Time (UTC)`. Common combined fields such as `Start DateTime`, `StartTime`, `Record Open Date/Time`, and `Msg Send Date` are also recognized.
 
 ### Supported Timestamp Formats
 
@@ -75,7 +92,11 @@ The application supports **18+ timestamp formats**, including:
 
 **Advanced Formats:**
 - Excel serial dates: `45696.7637037037`
-- With timezone: `2025-02-11 11:06:07.557 EST`, `2019/05/03 18:36:04 (GMT -4)` (timezone automatically stripped)
+- With timezone: `2025-02-11 11:06:07.557 EST`, `2019/05/03 18:36:04 (GMT -4)`, `2025-01-15T14:30:00Z` (converted to UTC for KML)
+- Without timezone: Uses the selected Source Timestamp UTC Offset (UTC by default); an explicit offset in a record takes precedence
+- Fixed offsets are shown with familiar North American abbreviations where useful; the numeric UTC offset is authoritative because abbreviations can be ambiguous
+- Ambiguous slash or dash dates use the selected Month/Day/Year or Day/Month/Year order; year-first dates are unaffected
+- Named timezones apply historical daylight-saving rules. Ambiguous or nonexistent transition times are omitted from KML and reported by data-row number rather than assigned an assumed instant
 
 **Note:** Data sets with missing azimuth, distance, or accuracy values will still process. The visualizations will reflect only the data provided, and alert messages will notify you of any missing fields.
 
@@ -101,38 +122,46 @@ Download the standalone executable `OS-LocationDataVisualizer.exe` - no Python i
 - PyQt6
 - pandas
 - openpyxl
+- xlrd
+- tzdata
 
 **Setup & Installation:**
 
 1. Clone the repository
 2. Install dependencies:
    ```bash
-   pip install -r requirements.txt
+   python -m pip install -r requirements.txt
    ```
 3. Run from source:
    ```bash
    python app.py
    ```
 
+**Run Tests:**
+
+```bash
+python -m unittest discover -s tests -v
+```
+
 **Building the Executable:**
 
 1. Install PyInstaller:
    ```bash
-   pip install pyinstaller
+   python -m pip install pyinstaller
    ```
 2. Build the executable:
    ```bash
    # Option 1: Use the spec file (recommended)
-   pyinstaller app.spec
+   python -m PyInstaller --clean app.spec
 
    # Option 2: Full command-line
-   pyinstaller --onefile --windowed --name "OS-LocationDataVisualizer" --icon=wifi_icon.ico --exclude-module=matplotlib --exclude-module=scipy --exclude-module=numba --noupx app.py
+   python -m PyInstaller --onefile --windowed --name "OS-LocationDataVisualizer" --icon=wifi_icon.ico --exclude-module=matplotlib --exclude-module=scipy --exclude-module=numba --noupx app.py
    ```
 3. Find the executable in the `dist/` directory (the file will be named `OS-LocationDataVisualizer.exe`)
 
 ## Privacy & Security
 
-This tool runs completely offline and never connects to the internet. All data remains on your local machine.
+Location-data processing and export run locally; the application does not upload source or output files. Generated KML, GeoJSON, and TXT logs can contain sensitive location information and should be handled accordingly. Opening project links or exported files in other applications is subject to those applications' behavior.
 
 ## Important Disclaimers
 
@@ -156,6 +185,6 @@ This program is free software: you can redistribute it and/or modify it under th
 This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 ---
-Copyright (c) 2025 CrimLawTech LLC
-**Version 1.1**  
+Copyright (c) 2025-2026 CrimLawTech LLC
+**Version 1.2**
 _Open Source Location Data Visualization Tool_
