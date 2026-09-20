@@ -832,6 +832,7 @@ class MainWindow(QMainWindow):
             'header_row': dialog.selected_header_row,
             'mappings': dialog.selected_mappings,
             'date_time_filter': dialog.selected_filter_metadata,
+            'cell_site_list': dialog.selected_cell_site_metadata,
         }
         filename = Path(self.data_file).name
         self.custom_label_input.clear()
@@ -858,6 +859,24 @@ class MainWindow(QMainWindow):
         self.add_status_message(
             f"✅ Imported {len(self.imported_dataframe)} rows as {dialog.selected_data_type} data"
         )
+        cell_site_metadata = dialog.selected_cell_site_metadata
+        if cell_site_metadata.get('enabled'):
+            matched_rows = cell_site_metadata.get('matched_rows', 0)
+            input_rows = cell_site_metadata.get('input_rows', 0)
+            unmatched_rows = cell_site_metadata.get('unmatched_rows', 0)
+            missing_key_rows = cell_site_metadata.get('missing_key_rows', 0)
+            prefix = (
+                "✅" if matched_rows == input_rows else "⚠️"
+            )
+            self.add_status_message(
+                f"{prefix} Cell site list matched {matched_rows} of "
+                f"{input_rows} original record rows"
+            )
+            if unmatched_rows or missing_key_rows:
+                self.add_status_message(
+                    f"⚠️ Cell site lookup: {unmatched_rows} rows had no match; "
+                    f"{missing_key_rows} rows lacked a complete lookup key"
+                )
         filter_metadata = dialog.selected_filter_metadata
         if filter_metadata.get('enabled'):
             self.add_status_message(
@@ -1279,6 +1298,7 @@ class MainWindow(QMainWindow):
                 'header_row': self.import_metadata.get('header_row'),
                 'mappings': dict(self.import_metadata.get('mappings', {})),
                 'date_time_filter': dict(self.import_metadata.get('date_time_filter', {})),
+                'cell_site_list': dict(self.import_metadata.get('cell_site_list', {})),
             }
         self.generation_started_utc = datetime.now(timezone.utc)
         
@@ -1542,6 +1562,54 @@ class MainWindow(QMainWindow):
             ])
             for target_field, source_column in self.current_import_metadata.get('mappings', {}).items():
                 lines.append(f"{target_field}: {source_column}")
+            cell_site_metadata = self.current_import_metadata.get(
+                'cell_site_list', {}
+            )
+            if cell_site_metadata.get('enabled'):
+                cell_site_path_value = cell_site_metadata.get('file_path')
+                cell_site_path = (
+                    Path(cell_site_path_value) if cell_site_path_value else None
+                )
+                cell_site_hash = (
+                    self.calculate_file_sha256(cell_site_path)
+                    if cell_site_path and cell_site_path.is_file()
+                    else 'Unavailable'
+                )
+                lines.extend([
+                    "",
+                    "Cell site list",
+                    f"Cell site list file: {cell_site_metadata.get('file_name') or (cell_site_path.name if cell_site_path else 'Unknown')}",
+                    f"Cell site list SHA-256: {cell_site_hash}",
+                    f"Worksheet: {cell_site_metadata.get('worksheet') or 'Not applicable'}",
+                    f"Header row: {cell_site_metadata.get('header_row')}",
+                    f"Value priority: {cell_site_metadata.get('policy_label') or cell_site_metadata.get('policy')}",
+                    "Original-record lookup mapping:",
+                ])
+                for role, source_column in cell_site_metadata.get(
+                    'original_key_mappings', {}
+                ).items():
+                    lines.append(f"{role}: {source_column}")
+                lines.append("Cell-site-list mapping:")
+                for role, source_column in cell_site_metadata.get(
+                    'cell_site_mappings', {}
+                ).items():
+                    lines.append(f"{role}: {source_column}")
+                lines.extend([
+                    f"Original rows evaluated: {cell_site_metadata.get('input_rows', 'Unknown')}",
+                    f"Cell site list rows: {cell_site_metadata.get('cell_site_rows', 'Unknown')}",
+                    f"Cell site list rows ignored - missing lookup key: {cell_site_metadata.get('cell_site_rows_ignored_missing_key', 'Unknown')}",
+                    f"Original rows matched to cell site list: {cell_site_metadata.get('matched_rows', 'Unknown')}",
+                    f"Original rows unmatched in cell site list: {cell_site_metadata.get('unmatched_rows', 'Unknown')}",
+                    f"Original source rows unmatched in cell site list: {self.format_audit_row_numbers(cell_site_metadata.get('unmatched_source_rows', []), cell_site_metadata.get('unmatched_rows', 0))}",
+                    f"Original rows missing a lookup key: {cell_site_metadata.get('missing_key_rows', 'Unknown')}",
+                    f"Original source rows missing a lookup key: {self.format_audit_row_numbers(cell_site_metadata.get('missing_key_source_rows', []), cell_site_metadata.get('missing_key_rows', 0))}",
+                ])
+                for field in ('Latitude', 'Longitude', 'Azimuth'):
+                    lines.extend([
+                        f"{field} values from cell site list: {cell_site_metadata.get('fields_from_cell_site_list', {}).get(field, 'Unknown')}",
+                        f"{field} values from original records: {cell_site_metadata.get('fields_from_original_records', {}).get(field, 'Unknown')}",
+                        f"{field} values left missing: {cell_site_metadata.get('fields_left_missing', {}).get(field, 'Unknown')}",
+                    ])
             filter_metadata = self.current_import_metadata.get('date_time_filter', {})
             if filter_metadata.get('enabled'):
                 lines.extend([
@@ -1590,6 +1658,16 @@ class MainWindow(QMainWindow):
             lines.append("None")
 
         return "\n".join(lines) + "\n"
+
+    @staticmethod
+    def format_audit_row_numbers(row_numbers, total_count):
+        """Format bounded physical row references without copying source values."""
+        if not row_numbers:
+            return "None"
+        row_text = ", ".join(str(row_number) for row_number in row_numbers)
+        if total_count > len(row_numbers):
+            return f"{row_text} (first {len(row_numbers)} of {total_count})"
+        return row_text
     
     def on_generation_error(self, error_message):
         """Handle KML generation error"""

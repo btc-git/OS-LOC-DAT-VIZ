@@ -528,6 +528,96 @@ class GenerationActionTests(unittest.TestCase):
             self.assertEqual("log\n", selected_path.with_suffix(".txt").read_text(encoding="utf-8"))
             launch_mock.assert_called_once_with(selected_path)
 
+    def test_generation_log_records_cell_site_list_provenance(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            source_path = root / "records.csv"
+            cell_site_path = root / "cell_sites.csv"
+            output_path = root / "result.kml"
+            source_path.write_text("records\n", encoding="utf-8")
+            cell_site_path.write_text("cell sites\n", encoding="utf-8")
+            output_path.write_text("<kml/>\n", encoding="utf-8")
+            output_path.with_suffix(".geojson").write_text(
+                '{"type":"FeatureCollection","features":[]}\n',
+                encoding="utf-8",
+            )
+
+            with patch.object(MainWindow, "show_disclaimer_dialog"):
+                window = MainWindow()
+            self.addCleanup(window.close)
+            window.current_generation_source_file = str(source_path)
+            window.current_generation_settings = {}
+            window.current_generation_type = "Distance from Tower"
+            window.current_import_metadata = {
+                "worksheet": None,
+                "header_row": 1,
+                "mappings": {"Timestamp": "Start_DateTime"},
+                "date_time_filter": {"enabled": False},
+                "cell_site_list": {
+                    "enabled": True,
+                    "file_path": str(cell_site_path),
+                    "file_name": cell_site_path.name,
+                    "worksheet": None,
+                    "header_row": 1,
+                    "policy": "cell_site_first_fallback_original",
+                    "policy_label": "Cell site list first; use original records when a value is missing",
+                    "original_key_mappings": {
+                        "Site ID": "Start_eNodeB",
+                        "Sector ID": "Start_Sector",
+                    },
+                    "cell_site_mappings": {
+                        "Site ID": "E/G NodeB ID",
+                        "Sector ID": "Cell ID",
+                        "Latitude": "Site Lat",
+                        "Longitude": "Site Long",
+                        "Azimuth": "Azimuth",
+                    },
+                    "input_rows": 1,
+                    "cell_site_rows": 1,
+                    "cell_site_rows_ignored_missing_key": 0,
+                    "matched_rows": 1,
+                    "unmatched_rows": 0,
+                    "unmatched_source_rows": [],
+                    "missing_key_rows": 0,
+                    "missing_key_source_rows": [],
+                    "fields_from_cell_site_list": {
+                        "Latitude": 1,
+                        "Longitude": 1,
+                        "Azimuth": 1,
+                    },
+                    "fields_from_original_records": {
+                        "Latitude": 0,
+                        "Longitude": 0,
+                        "Azimuth": 0,
+                    },
+                    "fields_left_missing": {
+                        "Latitude": 0,
+                        "Longitude": 0,
+                        "Azimuth": 0,
+                    },
+                },
+            }
+            window.kml_generator = SimpleNamespace(audit_summary={})
+
+            log_text = window.build_generation_log(output_path)
+            expected_cell_site_hash = window.calculate_file_sha256(
+                cell_site_path
+            )
+
+            self.assertIn("Cell site list file: cell_sites.csv", log_text)
+            self.assertIn(
+                f"Cell site list SHA-256: {expected_cell_site_hash}",
+                log_text,
+            )
+            self.assertIn("Site ID: Start_eNodeB", log_text)
+            self.assertIn("Site ID: E/G NodeB ID", log_text)
+            self.assertIn("Original rows matched to cell site list: 1", log_text)
+            self.assertIn(
+                "Original source rows unmatched in cell site list: None",
+                log_text,
+            )
+            self.assertIn("Latitude values from cell site list: 1", log_text)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -213,7 +213,9 @@ class ImportWizardDialog(QDialog):
     """Map columns from original records into the application's data model."""
 
     source_loading_finished = pyqtSignal(bool)
+    cell_site_loading_finished = pyqtSignal(bool)
     TIMESTAMP_EDGE_SCAN_LIMIT = 100
+    CELL_SITE_ROW_AUDIT_LIMIT = 100
 
     FIELD_ALIASES = {
         'Timestamp': ['timestamp', 'date time', 'datetime', 'start datetime', 'starttime',
@@ -224,7 +226,10 @@ class ImportWizardDialog(QDialog):
         'Latitude': ['latitude', 'lat', 'tower latitude', 'tower lat', 'cell latitude', 'cell lat'],
         'Longitude': ['longitude', 'lon', 'long', 'tower longitude', 'tower lon', 'cell longitude', 'cell lon'],
         'Azimuth': ['azimuth', 'bearing', 'direction'],
-        'Distance': ['distance', 'range', 'distance m', 'distance meters'],
+        'Distance': [
+            'distance', 'range', 'distance m', 'distance meters',
+            'start timing advance miles',
+        ],
         'Accuracy': ['gps accuracy', 'accuracy', 'gps_accuracy'],
     }
     FIELD_LABELS = {
@@ -237,6 +242,54 @@ class ImportWizardDialog(QDialog):
         'Distance': 'Distance from tower',
         'Accuracy': 'Location accuracy',
     }
+    ORIGINAL_KEY_ALIASES = {
+        'Site ID': [
+            'start enodeb', 'start e nodeb', 'start gnodeb', 'start g nodeb',
+            'start nodeb', 'start site id', 'enodeb id', 'gnodeb id',
+            'nodeb id', 'site id',
+        ],
+        'Sector ID': [
+            'start sector', 'start cell', 'start cell id', 'sector id',
+            'cell id', 'sector',
+        ],
+    }
+    CELL_SITE_FIELD_ALIASES = {
+        'Site ID': [
+            'e g nodeb id', 'enodeb id', 'gnodeb id', 'nodeb id',
+            'site id', 'site number',
+        ],
+        'Sector ID': ['cell id', 'sector id', 'sector', 'cell'],
+        'Latitude': [
+            'site lat', 'site latitude', 'latitude', 'lat', 'tower latitude',
+            'tower lat', 'cell latitude', 'cell lat',
+        ],
+        'Longitude': [
+            'site long', 'site longitude', 'longitude', 'lon', 'long',
+            'tower longitude', 'tower lon', 'cell longitude', 'cell lon',
+        ],
+        'Azimuth': ['azimuth', 'bearing', 'direction'],
+    }
+    CELL_SITE_FIELD_LABELS = {
+        'Site ID': 'Site / Node ID',
+        'Sector ID': 'Sector / Cell ID',
+        'Latitude': 'Site latitude',
+        'Longitude': 'Site longitude',
+        'Azimuth': 'Sector azimuth',
+    }
+    CELL_SITE_POLICIES = [
+        (
+            'Cell site list first; use original records when a value is missing',
+            'cell_site_first_fallback_original',
+        ),
+        (
+            'Cell site list only; leave unresolved values blank',
+            'cell_site_only',
+        ),
+        (
+            'Original records first; use cell site list when a value is missing',
+            'original_first_fallback_cell_site',
+        ),
+    ]
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -256,16 +309,30 @@ class ImportWizardDialog(QDialog):
         self.selected_date_order = 'MDY'
         self.selected_mappings = {}
         self.selected_filter_metadata = {'enabled': False}
+        self.selected_cell_site_metadata = {'enabled': False}
         self.selected_sheet_name = None
         self.selected_header_row = 1
         self.mapping_combos = {}
         self.mapping_labels = {}
+        self.original_key_mapping_combos = {}
+        self.cell_site_mapping_combos = {}
         self._cached_source_key = None
         self._cached_raw_dataframe = None
+        self.cell_site_path = None
+        self.cell_site_dataframe = None
+        self.selected_cell_site_sheet_name = None
+        self.selected_cell_site_header_row = 1
+        self._cached_cell_site_key = None
+        self._cached_cell_site_raw_dataframe = None
         self._reloading_source = False
         self._source_loader = None
+        self._cell_site_loader = None
         self._source_load_token = 0
+        self._cell_site_load_token = 0
+        self._source_loading = False
+        self._cell_site_loading = False
         self._background_loading_enabled = True
+        self._cell_site_background_loading_enabled = True
         self.setup_ui()
         self.apply_initial_size()
 
@@ -506,6 +573,146 @@ class ImportWizardDialog(QDialog):
         self.preview_table.setMinimumHeight(180)
         content_layout.addWidget(self.preview_table, 1)
 
+        self.cell_site_group = QGroupBox("Separate Cell Site List (Optional)")
+        cell_site_layout = QVBoxLayout(self.cell_site_group)
+        self.use_cell_site_list_checkbox = QCheckBox(
+            "Use a separate cell site list for tower coordinates and azimuth"
+        )
+        self.use_cell_site_list_checkbox.toggled.connect(
+            self.on_cell_site_enabled_changed
+        )
+        cell_site_layout.addWidget(self.use_cell_site_list_checkbox)
+
+        self.cell_site_controls = QWidget()
+        cell_site_controls_layout = QVBoxLayout(self.cell_site_controls)
+        cell_site_controls_layout.setContentsMargins(0, 0, 0, 0)
+        cell_site_controls_layout.setSpacing(8)
+
+        self.cell_site_drop_zone = ImportFileDropZone()
+        self.cell_site_drop_zone.setMinimumHeight(110)
+        self.cell_site_drop_zone.selected_label.setText(
+            "Selected: No cell site list selected"
+        )
+        self.cell_site_drop_zone.hint_label.setText(
+            "Drop a CSV, XLS, or XLSX cell site list here"
+        )
+        self.cell_site_drop_zone.file_dropped.connect(self.load_cell_site_file)
+        self.cell_site_drop_zone.browse_requested.connect(
+            self.browse_cell_site_file
+        )
+        cell_site_controls_layout.addWidget(self.cell_site_drop_zone)
+
+        self.cell_site_load_status = QLabel("Reading cell site list...")
+        self.cell_site_load_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.cell_site_load_status.setVisible(False)
+        cell_site_controls_layout.addWidget(self.cell_site_load_status)
+        self.cell_site_load_progress = QProgressBar()
+        self.cell_site_load_progress.setRange(0, 0)
+        self.cell_site_load_progress.setTextVisible(False)
+        self.cell_site_load_progress.setVisible(False)
+        cell_site_controls_layout.addWidget(self.cell_site_load_progress)
+
+        cell_site_options_layout = QGridLayout()
+        cell_site_options_layout.addWidget(QLabel("Worksheet:"), 0, 0)
+        self.cell_site_sheet_combo = QComboBox()
+        self.cell_site_sheet_combo.currentIndexChanged.connect(
+            self.reload_cell_site_source
+        )
+        cell_site_options_layout.addWidget(self.cell_site_sheet_combo, 0, 1)
+        cell_site_options_layout.addWidget(QLabel("Header row:"), 0, 2)
+        self.cell_site_header_row_spinbox = QSpinBox()
+        self.cell_site_header_row_spinbox.setRange(1, 100)
+        self.cell_site_header_row_spinbox.setValue(1)
+        self._cell_site_header_reload_timer = QTimer(self)
+        self._cell_site_header_reload_timer.setSingleShot(True)
+        self._cell_site_header_reload_timer.setInterval(250)
+        self._cell_site_header_reload_timer.timeout.connect(
+            self.reload_cell_site_source
+        )
+        self.cell_site_header_row_spinbox.valueChanged.connect(
+            lambda _value: self._cell_site_header_reload_timer.start()
+        )
+        cell_site_options_layout.addWidget(
+            self.cell_site_header_row_spinbox, 0, 3
+        )
+        cell_site_controls_layout.addLayout(cell_site_options_layout)
+
+        cell_site_mapping_group = QGroupBox("Cell Site List Mapping")
+        cell_site_mapping_layout = QGridLayout(cell_site_mapping_group)
+        cell_site_mapping_layout.addWidget(QLabel("Mapping role"), 0, 0)
+        cell_site_mapping_layout.addWidget(QLabel("Original records"), 0, 1)
+        cell_site_mapping_layout.addWidget(QLabel("Cell site list"), 0, 2)
+        for row, field in enumerate(('Site ID', 'Sector ID'), 1):
+            original_combo = QComboBox()
+            original_combo.addItem("Not mapped", None)
+            cell_site_combo = QComboBox()
+            cell_site_combo.addItem("Not mapped", None)
+            cell_site_combo.currentIndexChanged.connect(
+                self.update_cell_site_preview_headers
+            )
+            self.original_key_mapping_combos[field] = original_combo
+            self.cell_site_mapping_combos[field] = cell_site_combo
+            cell_site_mapping_layout.addWidget(
+                QLabel(self.CELL_SITE_FIELD_LABELS[field]), row, 0
+            )
+            cell_site_mapping_layout.addWidget(original_combo, row, 1)
+            cell_site_mapping_layout.addWidget(cell_site_combo, row, 2)
+
+        for row, field in enumerate(
+            ('Latitude', 'Longitude', 'Azimuth'), 3
+        ):
+            original_label = QLabel("Mapped above")
+            original_label.setStyleSheet("color: #9a9a9a;")
+            cell_site_combo = QComboBox()
+            cell_site_combo.addItem("Not mapped", None)
+            cell_site_combo.currentIndexChanged.connect(
+                self.update_cell_site_preview_headers
+            )
+            self.cell_site_mapping_combos[field] = cell_site_combo
+            cell_site_mapping_layout.addWidget(
+                QLabel(self.CELL_SITE_FIELD_LABELS[field]), row, 0
+            )
+            cell_site_mapping_layout.addWidget(original_label, row, 1)
+            cell_site_mapping_layout.addWidget(cell_site_combo, row, 2)
+
+        cell_site_mapping_note = QLabel(
+            "Match one site/node ID and one sector/cell ID from the original "
+            "records to the corresponding cell site list columns. Latitude and "
+            "longitude are required; azimuth is optional."
+        )
+        cell_site_mapping_note.setWordWrap(True)
+        cell_site_mapping_layout.addWidget(cell_site_mapping_note, 6, 0, 1, 3)
+        cell_site_controls_layout.addWidget(cell_site_mapping_group)
+
+        policy_layout = QHBoxLayout()
+        policy_layout.addWidget(QLabel("Value priority:"))
+        self.cell_site_policy_combo = QComboBox()
+        for label, value in self.CELL_SITE_POLICIES:
+            self.cell_site_policy_combo.addItem(label, value)
+        self.cell_site_policy_combo.currentIndexChanged.connect(
+            self.update_mapping_requirements
+        )
+        policy_layout.addWidget(self.cell_site_policy_combo, 1)
+        cell_site_controls_layout.addLayout(policy_layout)
+
+        self.cell_site_preview_label = QLabel(
+            "Cell Site List Preview - select a file to review its mapped columns."
+        )
+        self.cell_site_preview_label.setWordWrap(True)
+        cell_site_controls_layout.addWidget(self.cell_site_preview_label)
+        self.cell_site_preview_table = QTableWidget()
+        self.cell_site_preview_table.setEditTriggers(
+            QTableWidget.EditTrigger.NoEditTriggers
+        )
+        self.cell_site_preview_table.setAlternatingRowColors(True)
+        self.cell_site_preview_table.setMinimumHeight(150)
+        self.cell_site_preview_table.setStyleSheet(
+            self.preview_table.styleSheet()
+        )
+        cell_site_controls_layout.addWidget(self.cell_site_preview_table)
+        cell_site_layout.addWidget(self.cell_site_controls)
+        content_layout.addWidget(self.cell_site_group)
+
         content_scroll.setWidget(content_container)
         layout.addWidget(content_scroll, 1)
 
@@ -584,6 +791,74 @@ class ImportWizardDialog(QDialog):
         if file_path:
             self.load_file(file_path)
 
+    def browse_cell_site_file(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Cell Site List",
+            "",
+            "Cell Site Lists (*.csv *.xls *.xlsx);;All Files (*)",
+        )
+        if file_path:
+            self.load_cell_site_file(file_path)
+
+    def load_cell_site_file(self, file_path, background=True):
+        self.cell_site_path = file_path
+        self.cell_site_dataframe = None
+        self._cached_cell_site_key = None
+        self._cached_cell_site_raw_dataframe = None
+        self._cell_site_background_loading_enabled = background
+        self.cell_site_drop_zone.set_selected_filename(Path(file_path).name)
+        self.cell_site_preview_table.setRowCount(0)
+        self.cell_site_preview_table.setColumnCount(0)
+        self._load_cell_site_records(background=background)
+
+    def _load_cell_site_records(self, sheet_name=None, background=True):
+        """Load one cell site list worksheet independently of source records."""
+        if not self.cell_site_path:
+            return
+
+        self._cell_site_load_token += 1
+        token = self._cell_site_load_token
+        header_row = self.cell_site_header_row_spinbox.value() - 1
+        self.set_cell_site_loading(True)
+        if not background:
+            try:
+                result = SourceFileLoadWorker.read_source(
+                    self.cell_site_path,
+                    sheet_name=sheet_name,
+                    header_row=header_row,
+                )
+            except Exception as error:
+                self.on_cell_site_load_error(str(error), token)
+            else:
+                self.on_cell_site_load_result(result, token)
+            return
+
+        worker = SourceFileLoadWorker(
+            self.cell_site_path,
+            sheet_name=sheet_name,
+            header_row=header_row,
+            parent=QApplication.instance(),
+        )
+        self._cell_site_loader = worker
+        worker.result_ready.connect(
+            lambda result, load_token=token: self.on_cell_site_load_result(
+                result, load_token
+            )
+        )
+        worker.load_error.connect(
+            lambda message, load_token=token: self.on_cell_site_load_error(
+                message, load_token
+            )
+        )
+        worker.finished.connect(worker.deleteLater)
+        worker.finished.connect(
+            lambda load_worker=worker: self.on_cell_site_loader_finished(
+                load_worker
+            )
+        )
+        worker.start()
+
     def load_file(self, file_path, background=True):
         self.reset_timezone_defaults()
         self.source_path = file_path
@@ -645,6 +920,7 @@ class ImportWizardDialog(QDialog):
 
     def set_source_loading(self, loading):
         """Show source-read progress and prevent edits against partial data."""
+        self._source_loading = loading
         self.source_load_status.setVisible(loading)
         self.source_load_progress.setVisible(loading)
         self.drop_zone.setEnabled(not loading)
@@ -660,9 +936,26 @@ class ImportWizardDialog(QDialog):
             Path(self.source_path).suffix.lower() in ('.xls', '.xlsx')
         )
         self.sheet_combo.setEnabled(not loading and is_excel)
+        self.update_import_button_enabled()
+
+    def set_cell_site_loading(self, loading):
+        """Show CSL-read progress and prevent edits against partial data."""
+        self._cell_site_loading = loading
+        self.cell_site_load_status.setVisible(loading)
+        self.cell_site_load_progress.setVisible(loading)
+        self.update_cell_site_controls()
+        self.update_import_button_enabled()
+
+    def update_import_button_enabled(self):
+        if not hasattr(self, 'dialog_buttons'):
+            return
         self.dialog_buttons.button(
             QDialogButtonBox.StandardButton.Ok
-        ).setEnabled(not loading and self.source_dataframe is not None)
+        ).setEnabled(
+            not self._source_loading
+            and not self._cell_site_loading
+            and self.source_dataframe is not None
+        )
 
     def on_source_load_result(self, result, token):
         """Apply records returned by the active source worker."""
@@ -715,6 +1008,64 @@ class ImportWizardDialog(QDialog):
         if self._source_loader is worker:
             self._source_loader = None
 
+    def on_cell_site_load_result(self, result, token):
+        """Apply the cell site list returned by the active worker."""
+        if token != self._cell_site_load_token:
+            return
+
+        sheet_names = result['sheet_names']
+        selected_sheet = result['sheet_name']
+        self.cell_site_sheet_combo.blockSignals(True)
+        self.cell_site_sheet_combo.clear()
+        self.cell_site_sheet_combo.addItems(sheet_names)
+        self.cell_site_sheet_combo.setCurrentIndex(
+            self.cell_site_sheet_combo.findText(selected_sheet)
+        )
+        self.cell_site_sheet_combo.blockSignals(False)
+
+        raw_dataframe = result['raw_dataframe']
+        if raw_dataframe is not None:
+            self._cached_cell_site_key = (
+                self.cell_site_path,
+                selected_sheet,
+            )
+            self._cached_cell_site_raw_dataframe = raw_dataframe
+            self.cell_site_dataframe = self.dataframe_from_header_row(
+                raw_dataframe, self.cell_site_header_row_spinbox.value() - 1
+            )
+        else:
+            self._cached_cell_site_key = None
+            self._cached_cell_site_raw_dataframe = None
+            self.cell_site_dataframe = result['dataframe']
+
+        self.populate_cell_site_mapping_options()
+        self.populate_cell_site_preview()
+        self.set_cell_site_loading(False)
+        self.cell_site_loading_finished.emit(True)
+
+    def on_cell_site_load_error(self, message, token):
+        """Restore the CSL controls after a background read failure."""
+        if token != self._cell_site_load_token:
+            return
+        self.cell_site_dataframe = None
+        self.cell_site_path = None
+        self.cell_site_drop_zone.set_selected_filename(None)
+        self.cell_site_drop_zone.selected_label.setText(
+            "Selected: No cell site list selected"
+        )
+        self.set_cell_site_loading(False)
+        self.cell_site_loading_finished.emit(False)
+        QMessageBox.critical(
+            self,
+            "Cell Site List Error",
+            f"Could not read the selected cell site list:\n\n{message}",
+        )
+
+    def on_cell_site_loader_finished(self, worker):
+        """Release the completed CSL worker reference."""
+        if self._cell_site_loader is worker:
+            self._cell_site_loader = None
+
     def populate_loaded_source(self):
         """Populate mappings and previews after source records are available."""
         self._reloading_source = True
@@ -753,6 +1104,39 @@ class ImportWizardDialog(QDialog):
         except Exception as error:
             self.source_dataframe = None
             QMessageBox.critical(self, "Import Error", f"Could not read the selected data:\n\n{error}")
+
+    def reload_cell_site_source(self):
+        if not self.cell_site_path:
+            return
+        try:
+            header_row = self.cell_site_header_row_spinbox.value() - 1
+            suffix = Path(self.cell_site_path).suffix.lower()
+            if suffix == '.csv':
+                self._load_cell_site_records(
+                    background=self._cell_site_background_loading_enabled
+                )
+                return
+
+            sheet_name = self.cell_site_sheet_combo.currentText()
+            source_key = (self.cell_site_path, sheet_name)
+            if self._cached_cell_site_key != source_key:
+                self._load_cell_site_records(
+                    sheet_name=sheet_name,
+                    background=self._cell_site_background_loading_enabled,
+                )
+                return
+            self.cell_site_dataframe = self.dataframe_from_header_row(
+                self._cached_cell_site_raw_dataframe, header_row
+            )
+            self.populate_cell_site_mapping_options()
+            self.populate_cell_site_preview()
+        except Exception as error:
+            self.cell_site_dataframe = None
+            QMessageBox.critical(
+                self,
+                "Cell Site List Error",
+                f"Could not read the selected cell site list:\n\n{error}",
+            )
 
     @staticmethod
     def dataframe_from_header_row(raw_dataframe, header_row):
@@ -810,7 +1194,94 @@ class ImportWizardDialog(QDialog):
             self.timestamp_layout_combo.setCurrentIndex(
                 self.timestamp_layout_combo.findData('separate')
             )
+        self.populate_original_key_mapping_options()
         self.update_mapping_requirements()
+
+    def populate_original_key_mapping_options(self):
+        """Populate record-side columns used to match the optional CSL."""
+        if self.source_dataframe is None:
+            return
+        columns = [str(column) for column in self.source_dataframe.columns]
+        self.populate_aliased_combos(
+            self.original_key_mapping_combos,
+            self.ORIGINAL_KEY_ALIASES,
+            columns,
+        )
+
+    def populate_cell_site_mapping_options(self):
+        """Populate and suggest CSL-side join and tower field mappings."""
+        if self.cell_site_dataframe is None:
+            return
+        columns = [str(column) for column in self.cell_site_dataframe.columns]
+        self.populate_aliased_combos(
+            self.cell_site_mapping_combos,
+            self.CELL_SITE_FIELD_ALIASES,
+            columns,
+        )
+
+    def populate_aliased_combos(self, combos, aliases, columns):
+        normalized = {
+            self.normalize_name(column): column for column in columns
+        }
+        for field, combo in combos.items():
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItem("Not mapped", None)
+            for column in columns:
+                combo.addItem(column, column)
+            for alias in aliases[field]:
+                matching_column = normalized.get(self.normalize_name(alias))
+                if matching_column is not None:
+                    combo.setCurrentIndex(combo.findData(matching_column))
+                    break
+            combo.blockSignals(False)
+
+    def populate_cell_site_preview(self):
+        preview = self.cell_site_dataframe.head(25)
+        self.cell_site_preview_table.setRowCount(len(preview))
+        self.cell_site_preview_table.setColumnCount(len(preview.columns))
+        header_row = self.cell_site_header_row_spinbox.value()
+        first_data_row = header_row + 1
+        for row_index, (_, row) in enumerate(preview.iterrows()):
+            for column_index, value in enumerate(row):
+                self.cell_site_preview_table.setItem(
+                    row_index,
+                    column_index,
+                    QTableWidgetItem("" if pd.isna(value) else str(value)),
+                )
+            self.cell_site_preview_table.setVerticalHeaderItem(
+                row_index, QTableWidgetItem(str(first_data_row + row_index))
+            )
+        self.cell_site_preview_label.setText(
+            "Cell Site List Preview - first 25 data rows "
+            f"(Header row: {header_row})."
+        )
+        self.update_cell_site_preview_headers()
+        self.cell_site_preview_table.resizeColumnsToContents()
+
+    def update_cell_site_preview_headers(self):
+        if self.cell_site_dataframe is None:
+            return
+        source_mappings = {
+            combo.currentData(): self.CELL_SITE_FIELD_LABELS[field]
+            for field, combo in self.cell_site_mapping_combos.items()
+            if combo.currentData()
+        }
+        for column_index, source_column in enumerate(
+            self.cell_site_dataframe.columns
+        ):
+            source_name = str(source_column)
+            mapped_field = source_mappings.get(source_name, "Not mapped")
+            item = QTableWidgetItem(
+                f"Source: {source_name}\nMapped to: {mapped_field}"
+            )
+            item.setToolTip(
+                f"Cell site list column: {source_name}\n"
+                f"Mapping role: {mapped_field}"
+            )
+            self.cell_site_preview_table.setHorizontalHeaderItem(
+                column_index, item
+            )
 
     def populate_preview(self):
         preview = self.source_dataframe.head(25)
@@ -874,7 +1345,8 @@ class ImportWizardDialog(QDialog):
             active_fields.add('Timestamp')
             timestamp_requirement = 'Timestamp (combined)'
 
-        required = ['Latitude', 'Longitude']
+        using_cell_site_list = self.cell_site_list_enabled()
+        required = [] if using_cell_site_list else ['Latitude', 'Longitude']
         note = ""
         if data_type == 'Tower/Sector':
             active_fields.add('Azimuth')
@@ -892,10 +1364,53 @@ class ImportWizardDialog(QDialog):
             self.mapping_labels[field].setVisible(visible)
             self.mapping_combos[field].setVisible(visible)
 
+        if using_cell_site_list:
+            note = (
+                "Tower coordinates and azimuth will be resolved using the cell "
+                "site list mapping below. Original Latitude, Longitude, and "
+                "Azimuth mappings are optional fallback sources."
+            )
+        required_text = ', '.join(required) if required else 'no tower fields'
         self.mapping_note.setText(
-            f"Required: {', '.join(required)}, plus {timestamp_requirement}. {note}"
+            f"Required in original records: {required_text}, plus "
+            f"{timestamp_requirement}. {note}"
         )
+        self.update_cell_site_controls()
         self.update_preview_headers()
+
+    def on_cell_site_enabled_changed(self):
+        self.update_cell_site_controls()
+        self.update_mapping_requirements()
+
+    def cell_site_list_enabled(self):
+        return (
+            self.use_cell_site_list_checkbox.isChecked()
+            and self.record_type_combo.currentData()
+            in ('Tower/Sector', 'Distance from Tower')
+        )
+
+    def update_cell_site_controls(self):
+        supported = self.record_type_combo.currentData() in (
+            'Tower/Sector', 'Distance from Tower'
+        )
+        self.use_cell_site_list_checkbox.setEnabled(supported)
+        self.use_cell_site_list_checkbox.setToolTip(
+            "" if supported else
+            "Separate cell site lists apply only to tower-based records."
+        )
+        controls_enabled = (
+            supported
+            and self.use_cell_site_list_checkbox.isChecked()
+            and not self._cell_site_loading
+        )
+        self.cell_site_controls.setEnabled(controls_enabled)
+        is_excel = bool(
+            self.cell_site_path
+            and Path(self.cell_site_path).suffix.lower() in ('.xls', '.xlsx')
+        )
+        self.cell_site_sheet_combo.setEnabled(
+            controls_enabled and is_excel
+        )
 
     def active_mapping_fields(self):
         """Return fields applicable to the selected record and timestamp layouts."""
@@ -1134,6 +1649,104 @@ class ImportWizardDialog(QDialog):
             if field in active_fields
         }
 
+    def current_original_key_mappings(self):
+        return {
+            field: combo.currentData()
+            for field, combo in self.original_key_mapping_combos.items()
+        }
+
+    def current_cell_site_mappings(self):
+        return {
+            field: combo.currentData()
+            for field, combo in self.cell_site_mapping_combos.items()
+        }
+
+    def validate_cell_site_configuration(self):
+        """Return complete CSL mappings or raise a user-facing validation error."""
+        if self.cell_site_dataframe is None or not self.cell_site_path:
+            raise ValueError("Select a cell site list file before importing.")
+
+        original_key_mappings = self.current_original_key_mappings()
+        cell_site_mappings = self.current_cell_site_mappings()
+        missing = []
+        for field in ('Site ID', 'Sector ID'):
+            if not original_key_mappings.get(field):
+                missing.append(f"Original records: {self.CELL_SITE_FIELD_LABELS[field]}")
+        for field in ('Site ID', 'Sector ID', 'Latitude', 'Longitude'):
+            if not cell_site_mappings.get(field):
+                missing.append(f"Cell site list: {self.CELL_SITE_FIELD_LABELS[field]}")
+        if missing:
+            raise ValueError(
+                "Map the following required cell site fields:\n\n"
+                + "\n".join(missing)
+            )
+
+        for source_name, mappings in (
+            ('original records join', original_key_mappings),
+            ('cell site list', cell_site_mappings),
+        ):
+            selected_columns = [
+                column for column in mappings.values() if column
+            ]
+            if len(selected_columns) != len(set(selected_columns)):
+                raise ValueError(
+                    f"Each {source_name} column can be assigned to only one "
+                    "cell site mapping role."
+                )
+        return original_key_mappings, cell_site_mappings
+
+    def apply_cell_site_list(self, normalized, source_dataframe=None):
+        """Resolve optional CSL fields and return metadata suitable for the log."""
+        if not self.cell_site_list_enabled():
+            return normalized, {'enabled': False}
+
+        source_dataframe = (
+            self.source_dataframe
+            if source_dataframe is None
+            else source_dataframe
+        )
+        original_key_mappings, cell_site_mappings = (
+            self.validate_cell_site_configuration()
+        )
+        policy = self.cell_site_policy_combo.currentData()
+        resolved, resolution_metadata = self.resolve_cell_site_fields(
+            normalized,
+            source_dataframe,
+            self.cell_site_dataframe,
+            original_key_mappings,
+            cell_site_mappings,
+            policy,
+        )
+        is_excel = Path(self.cell_site_path).suffix.lower() in ('.xls', '.xlsx')
+        metadata = {
+            'enabled': True,
+            'file_path': str(self.cell_site_path),
+            'file_name': Path(self.cell_site_path).name,
+            'worksheet': (
+                self.cell_site_sheet_combo.currentText() if is_excel else None
+            ),
+            'header_row': self.cell_site_header_row_spinbox.value(),
+            'original_key_mappings': dict(original_key_mappings),
+            'cell_site_mappings': {
+                field: column for field, column in cell_site_mappings.items()
+                if column
+            },
+            'policy': policy,
+            'policy_label': self.cell_site_policy_combo.currentText(),
+            **resolution_metadata,
+        }
+        source_header_row = self.header_row_spinbox.value()
+        metadata['unmatched_source_rows'] = [
+            position + source_header_row
+            for position in metadata.pop('unmatched_row_positions')
+        ]
+        metadata['missing_key_source_rows'] = [
+            position + source_header_row
+            for position in metadata.pop('missing_key_row_positions')
+        ]
+        metadata['source_row_audit_limit'] = self.CELL_SITE_ROW_AUDIT_LIMIT
+        return resolved, metadata
+
     def build_normalized_dataframe(self, mappings, source_dataframe=None):
         """Build the in-memory application columns from source mappings."""
         source_dataframe = (
@@ -1156,6 +1769,144 @@ class ImportWizardDialog(QDialog):
             )
         return normalized
 
+    @staticmethod
+    def normalize_lookup_value(value):
+        """Normalize one site/sector identifier without exposing it in logs."""
+        if pd.isna(value):
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        if re.fullmatch(r'[+-]?\d+\.0+', text):
+            text = text.split('.', 1)[0]
+        return text.casefold()
+
+    @classmethod
+    def resolve_cell_site_fields(
+        cls,
+        normalized,
+        source_dataframe,
+        cell_site_dataframe,
+        original_key_mappings,
+        cell_site_mappings,
+        policy,
+    ):
+        """Resolve tower coordinates and azimuth through a two-column CSL key."""
+        supported_policies = {
+            'cell_site_first_fallback_original',
+            'cell_site_only',
+            'original_first_fallback_cell_site',
+        }
+        if policy not in supported_policies:
+            raise ValueError(f"Unknown cell site resolution policy: {policy}")
+
+        def lookup_key(row, mappings):
+            return tuple(
+                cls.normalize_lookup_value(row[mappings[field]])
+                for field in ('Site ID', 'Sector ID')
+            )
+
+        cell_site_rows = {}
+        duplicate_keys = set()
+        ignored_missing_key_rows = 0
+        for _, cell_site_row in cell_site_dataframe.iterrows():
+            key = lookup_key(cell_site_row, cell_site_mappings)
+            if any(value is None for value in key):
+                ignored_missing_key_rows += 1
+                continue
+            if key in cell_site_rows:
+                duplicate_keys.add(key)
+                continue
+            cell_site_rows[key] = cell_site_row
+
+        if duplicate_keys:
+            duplicate_count = len(duplicate_keys)
+            raise ValueError(
+                "The cell site list contains "
+                f"{duplicate_count} duplicate mapped site/sector "
+                f"{'key' if duplicate_count == 1 else 'keys'}. "
+                "Each mapped key must identify exactly one cell site row."
+            )
+
+        resolved = normalized.copy()
+        fields = ('Latitude', 'Longitude', 'Azimuth')
+        for field in fields:
+            if field not in resolved:
+                resolved[field] = pd.NA
+
+        metadata = {
+            'input_rows': len(source_dataframe),
+            'cell_site_rows': len(cell_site_dataframe),
+            'cell_site_rows_ignored_missing_key': ignored_missing_key_rows,
+            'matched_rows': 0,
+            'unmatched_rows': 0,
+            'missing_key_rows': 0,
+            'unmatched_row_positions': [],
+            'missing_key_row_positions': [],
+            'fields_from_cell_site_list': {field: 0 for field in fields},
+            'fields_from_original_records': {field: 0 for field in fields},
+            'fields_left_missing': {field: 0 for field in fields},
+        }
+
+        for position in range(len(source_dataframe)):
+            source_row = source_dataframe.iloc[position]
+            output_index = resolved.index[position]
+            key = lookup_key(source_row, original_key_mappings)
+            if any(value is None for value in key):
+                metadata['missing_key_rows'] += 1
+                if len(metadata['missing_key_row_positions']) < cls.CELL_SITE_ROW_AUDIT_LIMIT:
+                    metadata['missing_key_row_positions'].append(position + 1)
+                cell_site_row = None
+            else:
+                cell_site_row = cell_site_rows.get(key)
+                if cell_site_row is None:
+                    metadata['unmatched_rows'] += 1
+                    if len(metadata['unmatched_row_positions']) < cls.CELL_SITE_ROW_AUDIT_LIMIT:
+                        metadata['unmatched_row_positions'].append(position + 1)
+                else:
+                    metadata['matched_rows'] += 1
+
+            for field in fields:
+                original_value = resolved.at[output_index, field]
+                cell_site_column = cell_site_mappings.get(field)
+                cell_site_value = (
+                    pd.NA
+                    if cell_site_row is None or not cell_site_column
+                    else cell_site_row[cell_site_column]
+                )
+                original_available = not pd.isna(original_value) and str(original_value).strip()
+                cell_site_available = not pd.isna(cell_site_value) and str(cell_site_value).strip()
+
+                if policy == 'cell_site_only':
+                    candidates = (('cell_site_list', cell_site_value, cell_site_available),)
+                elif policy == 'original_first_fallback_cell_site':
+                    candidates = (
+                        ('original_records', original_value, original_available),
+                        ('cell_site_list', cell_site_value, cell_site_available),
+                    )
+                else:
+                    candidates = (
+                        ('cell_site_list', cell_site_value, cell_site_available),
+                        ('original_records', original_value, original_available),
+                    )
+
+                selected_source = None
+                selected_value = pd.NA
+                for candidate_source, candidate_value, available in candidates:
+                    if available:
+                        selected_source = candidate_source
+                        selected_value = candidate_value
+                        break
+                resolved.at[output_index, field] = selected_value
+                if selected_source == 'cell_site_list':
+                    metadata['fields_from_cell_site_list'][field] += 1
+                elif selected_source == 'original_records':
+                    metadata['fields_from_original_records'][field] += 1
+                else:
+                    metadata['fields_left_missing'][field] += 1
+
+        return resolved, metadata
+
     def preview_filter_results(self):
         """Show timestamp and coordinate counts before accepting the import."""
         if self.source_dataframe is None:
@@ -1163,16 +1914,20 @@ class ImportWizardDialog(QDialog):
             return
         mappings = self.current_mappings()
         timestamp_fields = ('Date', 'Time') if self.timestamp_layout_combo.currentData() == 'separate' else ('Timestamp',)
-        required_fields = ('Latitude', 'Longitude', *timestamp_fields)
+        coordinate_fields = (
+            () if self.cell_site_list_enabled() else ('Latitude', 'Longitude')
+        )
+        required_fields = (*coordinate_fields, *timestamp_fields)
         if any(not mappings.get(field) for field in required_fields):
             QMessageBox.warning(self, "Incomplete Mapping", "Map the timestamp, latitude, and longitude fields before checking the filter.")
             return
 
         normalized = self.build_normalized_dataframe(mappings)
         try:
-            filtered, metadata = self.apply_datetime_filter(normalized)
+            normalized, _ = self.apply_cell_site_list(normalized)
+            _, metadata = self.apply_datetime_filter(normalized)
         except ValueError as error:
-            QMessageBox.warning(self, "Invalid Date/Time Filter", str(error))
+            QMessageBox.warning(self, "Import Validation", str(error))
             return
 
         self.filter_result_label.setText(
@@ -1248,7 +2003,9 @@ class ImportWizardDialog(QDialog):
             return
 
         mappings = self.current_mappings()
-        required = ['Latitude', 'Longitude']
+        required = (
+            [] if self.cell_site_list_enabled() else ['Latitude', 'Longitude']
+        )
         data_type = self.record_type_combo.currentData()
         if data_type == 'Distance from Tower':
             required.append('Distance')
@@ -1270,6 +2027,14 @@ class ImportWizardDialog(QDialog):
             return
 
         normalized = self.build_normalized_dataframe(mappings)
+
+        try:
+            normalized, cell_site_metadata = self.apply_cell_site_list(
+                normalized
+            )
+        except ValueError as error:
+            QMessageBox.warning(self, "Cell Site List Mapping", str(error))
+            return
 
         try:
             normalized, filter_metadata = self.apply_datetime_filter(normalized)
@@ -1299,8 +2064,12 @@ class ImportWizardDialog(QDialog):
             field: source_column for field, source_column in mappings.items() if source_column
         }
         self.selected_filter_metadata = filter_metadata
+        self.selected_cell_site_metadata = cell_site_metadata
         self.selected_sheet_name = (
             self.sheet_combo.currentText() if self.sheet_combo.isEnabled() else None
         )
         self.selected_header_row = self.header_row_spinbox.value()
+        if cell_site_metadata.get('enabled'):
+            self.selected_cell_site_sheet_name = cell_site_metadata['worksheet']
+            self.selected_cell_site_header_row = cell_site_metadata['header_row']
         self.accept()

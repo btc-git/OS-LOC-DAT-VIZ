@@ -303,6 +303,248 @@ class ImportWizardDialogUITests(unittest.TestCase):
             self.assertIn("Header row: 1", dialog.preview_label.text())
             self.assertEqual("2", dialog.preview_table.verticalHeaderItem(0).text())
 
+    def test_cell_site_lookup_uses_composite_key_and_field_fallback(self):
+        records = pd.DataFrame([
+            {
+                "Start_eNodeB": 1001,
+                "Start_Sector": 1,
+                "Latitude": 40.1,
+                "Longitude": -70.1,
+                "Azimuth": 10,
+            },
+            {
+                "Start_eNodeB": 1001,
+                "Start_Sector": 2,
+                "Latitude": 40.2,
+                "Longitude": -70.2,
+                "Azimuth": 20,
+            },
+            {
+                "Start_eNodeB": 9999,
+                "Start_Sector": 1,
+                "Latitude": 40.3,
+                "Longitude": -70.3,
+                "Azimuth": 30,
+            },
+            {
+                "Start_eNodeB": None,
+                "Start_Sector": 1,
+                "Latitude": 40.4,
+                "Longitude": -70.4,
+                "Azimuth": 40,
+            },
+        ])
+        cell_sites = pd.DataFrame([
+            {
+                "E/G NodeB ID": 1001,
+                "Cell ID": 1,
+                "Site Lat": 45.1,
+                "Site Long": -75.1,
+                "Azimuth": 120,
+            },
+            {
+                "E/G NodeB ID": 1001,
+                "Cell ID": 2,
+                "Site Lat": None,
+                "Site Long": -75.2,
+                "Azimuth": None,
+            },
+        ])
+        normalized = records[["Latitude", "Longitude", "Azimuth"]].copy()
+
+        resolved, metadata = ImportWizardDialog.resolve_cell_site_fields(
+            normalized,
+            records,
+            cell_sites,
+            {"Site ID": "Start_eNodeB", "Sector ID": "Start_Sector"},
+            {
+                "Site ID": "E/G NodeB ID",
+                "Sector ID": "Cell ID",
+                "Latitude": "Site Lat",
+                "Longitude": "Site Long",
+                "Azimuth": "Azimuth",
+            },
+            "cell_site_first_fallback_original",
+        )
+
+        self.assertEqual([45.1, 40.2, 40.3, 40.4], resolved["Latitude"].tolist())
+        self.assertEqual([-75.1, -75.2, -70.3, -70.4], resolved["Longitude"].tolist())
+        self.assertEqual([120, 20, 30, 40], resolved["Azimuth"].tolist())
+        self.assertEqual(2, metadata["matched_rows"])
+        self.assertEqual(1, metadata["unmatched_rows"])
+        self.assertEqual(1, metadata["missing_key_rows"])
+        self.assertEqual([3], metadata["unmatched_row_positions"])
+        self.assertEqual([4], metadata["missing_key_row_positions"])
+        self.assertEqual(
+            {"Latitude": 1, "Longitude": 2, "Azimuth": 1},
+            metadata["fields_from_cell_site_list"],
+        )
+
+        cell_site_only, _metadata = ImportWizardDialog.resolve_cell_site_fields(
+            normalized,
+            records,
+            cell_sites,
+            {"Site ID": "Start_eNodeB", "Sector ID": "Start_Sector"},
+            {
+                "Site ID": "E/G NodeB ID",
+                "Sector ID": "Cell ID",
+                "Latitude": "Site Lat",
+                "Longitude": "Site Long",
+                "Azimuth": "Azimuth",
+            },
+            "cell_site_only",
+        )
+        self.assertTrue(pd.isna(cell_site_only.loc[1, "Latitude"]))
+        self.assertTrue(pd.isna(cell_site_only.loc[2, "Longitude"]))
+
+        original_first, _metadata = ImportWizardDialog.resolve_cell_site_fields(
+            normalized,
+            records,
+            cell_sites,
+            {"Site ID": "Start_eNodeB", "Sector ID": "Start_Sector"},
+            {
+                "Site ID": "E/G NodeB ID",
+                "Sector ID": "Cell ID",
+                "Latitude": "Site Lat",
+                "Longitude": "Site Long",
+                "Azimuth": "Azimuth",
+            },
+            "original_first_fallback_cell_site",
+        )
+        self.assertEqual(records["Latitude"].tolist(), original_first["Latitude"].tolist())
+        self.assertEqual(records["Longitude"].tolist(), original_first["Longitude"].tolist())
+        self.assertEqual(records["Azimuth"].tolist(), original_first["Azimuth"].tolist())
+
+    def test_import_can_resolve_tower_fields_from_separate_cell_site_list(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            records_path = root / "timing_advance.csv"
+            cell_sites_path = root / "cell_sites.csv"
+            pd.DataFrame([{
+                "Start_DateTime": "2024-01-15 14:00:00",
+                "Start_eNodeB": 1001,
+                "Start_Sector": 2,
+                "Start_Timing_Advance_Miles": 0.31,
+            }]).to_csv(records_path, index=False)
+            pd.DataFrame([{
+                "E/G NodeB ID": 1001,
+                "Cell ID": 2,
+                "Azimuth": 135,
+                "Site Lat": 43.15,
+                "Site Long": -77.61,
+            }]).to_csv(cell_sites_path, index=False)
+
+            dialog = ImportWizardDialog()
+            dialog.load_file(str(records_path), background=False)
+            self.assertEqual(
+                "Start_Timing_Advance_Miles",
+                dialog.mapping_combos["Distance"].currentData(),
+            )
+            self.assertEqual(
+                "Distance from Tower", dialog.record_type_combo.currentData()
+            )
+            dialog.use_cell_site_list_checkbox.setChecked(True)
+            dialog.load_cell_site_file(str(cell_sites_path), background=False)
+
+            self.assertEqual(
+                "Start_eNodeB",
+                dialog.original_key_mapping_combos["Site ID"].currentData(),
+            )
+            self.assertEqual(
+                "Start_Sector",
+                dialog.original_key_mapping_combos["Sector ID"].currentData(),
+            )
+            self.assertEqual(
+                "E/G NodeB ID",
+                dialog.cell_site_mapping_combos["Site ID"].currentData(),
+            )
+            self.assertEqual(
+                "Cell ID",
+                dialog.cell_site_mapping_combos["Sector ID"].currentData(),
+            )
+
+            dialog.accept_import()
+
+            self.assertEqual(43.15, dialog.normalized_dataframe.loc[0, "Latitude"])
+            self.assertEqual(-77.61, dialog.normalized_dataframe.loc[0, "Longitude"])
+            self.assertEqual(135, dialog.normalized_dataframe.loc[0, "Azimuth"])
+            self.assertEqual(1, dialog.selected_cell_site_metadata["matched_rows"])
+            self.assertEqual([], dialog.selected_cell_site_metadata["unmatched_source_rows"])
+            self.assertEqual([], dialog.selected_cell_site_metadata["missing_key_source_rows"])
+            self.assertEqual(
+                "cell_site_first_fallback_original",
+                dialog.selected_cell_site_metadata["policy"],
+            )
+
+    def test_duplicate_cell_site_keys_are_rejected_as_ambiguous(self):
+        records = pd.DataFrame([{"Node": 1001, "Sector": 1}])
+        normalized = pd.DataFrame([{
+            "Latitude": 40.1,
+            "Longitude": -70.1,
+            "Azimuth": 10,
+        }])
+        cell_sites = pd.DataFrame([
+            {"Node": 1001, "Sector": 1, "Lat": 43.1, "Lon": -77.1},
+            {"Node": 1001, "Sector": 1, "Lat": 44.1, "Lon": -78.1},
+        ])
+
+        with self.assertRaisesRegex(ValueError, "duplicate mapped site/sector key"):
+            ImportWizardDialog.resolve_cell_site_fields(
+                normalized,
+                records,
+                cell_sites,
+                {"Site ID": "Node", "Sector ID": "Sector"},
+                {
+                    "Site ID": "Node",
+                    "Sector ID": "Sector",
+                    "Latitude": "Lat",
+                    "Longitude": "Lon",
+                    "Azimuth": None,
+                },
+                "cell_site_first_fallback_original",
+            )
+
+    def test_cell_site_excel_uses_its_own_sheet_and_header_row(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "cell_sites.xlsx"
+            workbook = Workbook()
+            first_sheet = workbook.active
+            first_sheet.title = "Notes"
+            first_sheet.append(["not the cell site list"])
+            cell_site_sheet = workbook.create_sheet("Cell Sites")
+            cell_site_sheet.append(["Report title"])
+            cell_site_sheet.append([
+                "E/G NodeB ID", "Cell ID", "Site Lat", "Site Long", "Azimuth"
+            ])
+            cell_site_sheet.append([1001, 2, 43.15, -77.61, 135])
+            workbook.save(path)
+
+            dialog = ImportWizardDialog()
+            dialog.record_type_combo.setCurrentIndex(
+                dialog.record_type_combo.findData("Distance from Tower")
+            )
+            dialog.use_cell_site_list_checkbox.setChecked(True)
+            dialog._cell_site_header_reload_timer.setInterval(0)
+            dialog.load_cell_site_file(str(path), background=False)
+            dialog.cell_site_sheet_combo.setCurrentText("Cell Sites")
+            dialog.cell_site_header_row_spinbox.setValue(2)
+            self.app.processEvents()
+
+            self.assertEqual(
+                ["E/G NodeB ID", "Cell ID", "Site Lat", "Site Long", "Azimuth"],
+                list(dialog.cell_site_dataframe.columns),
+            )
+            self.assertEqual(
+                "E/G NodeB ID",
+                dialog.cell_site_mapping_combos["Site ID"].currentData(),
+            )
+
+            dialog.record_type_combo.setCurrentIndex(
+                dialog.record_type_combo.findData("Location Point")
+            )
+            self.assertFalse(dialog.use_cell_site_list_checkbox.isEnabled())
+            self.assertFalse(dialog.cell_site_list_enabled())
+
 
 if __name__ == "__main__":
     unittest.main()
