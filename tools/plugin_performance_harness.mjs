@@ -349,6 +349,15 @@ function makeDocumentMock(stats) {
             stats.domListeners++;
             (this.listeners[type] ||= []).push(listener);
         }
+        closest(selector) {
+            const role = /^\[data-role='([^']+)'\]$/.exec(selector)?.[1];
+            let current = this;
+            while (current) {
+                if (role && current.dataset?.role === role) return current;
+                current = current.parentNode;
+            }
+            return null;
+        }
         dispatchEvent(event) {
             for (const listener of this.listeners[event.type] || []) listener.call(this, event);
         }
@@ -393,6 +402,7 @@ function buildRuntime(diag, scenario) {
         labelSetDataCalls: 0,
         labelFeatureCountLast: 0,
         fitBoundsCalls: 0,
+        openFloatingPanelCalls: 0,
         domCreates: 0,
         domListeners: 0,
         domEventRows: 0,
@@ -493,7 +503,7 @@ function buildRuntime(diag, scenario) {
         registerToolbarMenu() { return { dispose() { } }; },
         openRightPanel() { },
         closeRightPanel() { },
-        openFloatingPanel() { },
+        openFloatingPanel() { op.openFloatingPanelCalls++; },
         closeFloatingPanel() { },
         fitBounds() { op.fitBoundsCalls++; }
     };
@@ -563,7 +573,7 @@ async function loadDiagModule() {
         fail(`Missing plugin file: ${pluginPath}`);
     }
     const src = fs.readFileSync(pluginPath, "utf8") +
-        "\nexport const __diag = { state, scanAll, applyVisibility, applyDateFilter, eventDisplayMinute, eventDateTimeBounds, eventMatchesDateFilter, makeDateFilterControl, makeAboutSection, rebuildNativeIndex, reconcileGeojsonRendering, focusEvents, detailDescriptionForFeature, parseDescription, formatMainEventLabel, formatMapTimeLabel, scheduleFullScan, updateMapLabels, updateDynamicUI, renderEventList, renderPanel, renderPanelSafe, shouldShow, timelineRange, eventFromMapFeature, collectOslocLayerDiagnostics };\n";
+        "\nexport const __diag = { state, scanAll, applyVisibility, applyDateFilter, eventDisplayMinute, eventDateTimeBounds, eventMatchesDateFilter, makeDateFilterControl, makeAboutSection, rebuildNativeIndex, reconcileGeojsonRendering, focusEvents, activateEvent, detailDescriptionForFeature, parseDescription, formatMainEventLabel, formatMapTimeLabel, scheduleFullScan, updateMapLabels, updateDynamicUI, renderEventList, renderPanel, renderPanelSafe, shouldShow, timelineRange, eventFromMapFeature, collectOslocLayerDiagnostics };\n";
     fs.writeFileSync(tmpModule, src, "utf8");
     try {
         const moduleUrl = `${pathToFileURL(tmpModule).href}?v=${Date.now()}`;
@@ -1214,10 +1224,17 @@ function runGeojsonFocusCheck(diag) {
     assert(found === 2, "Focus scenario should discover two events");
 
     const target = diag.state.events[0];
-    diag.focusEvents([target]);
+    const eventSection = diag.renderEventList([target]);
+    const eventList = eventSection.children[0];
+    const eventRow = eventList.children[0];
+    const eventBody = eventRow.children[1];
+    const nestedTitle = eventBody.children[0];
+    eventList.dispatchEvent({ type: "click", target: nestedTitle });
     const visible = diag.state.events.filter(diag.shouldShow);
-    assert(visible.length === 1 && visible[0].key === target.key, "Focus must make exactly its target visible");
-    assert(runtime.op.fitBoundsCalls === 1, "Focus must frame its visible target");
+    assert(visible.length === 1 && visible[0].key === target.key, "Record activation must make exactly its target visible");
+    assert(runtime.op.fitBoundsCalls === 1, "Record activation must frame its visible target");
+    assert(diag.state.selectedEventKey === target.key, "Record activation must select its target");
+    assert(runtime.op.openFloatingPanelCalls === 1, "Record activation must open event details");
 
     for (const layerId of diag.state.pluginEvidenceLayerIds) {
         const filter = JSON.stringify(runtime.map.getLayer(layerId)?.filter || null);
@@ -1225,7 +1242,12 @@ function runGeojsonFocusCheck(diag) {
         assert(!filter.includes("osloc_event_id"), `Focused GeoJSON layer must not use ambiguous event ids: ${layerId}`);
     }
 
-    return { found, visible: visible.length, fitBoundsCalls: runtime.op.fitBoundsCalls };
+    return {
+        found,
+        visible: visible.length,
+        fitBoundsCalls: runtime.op.fitBoundsCalls,
+        openFloatingPanelCalls: runtime.op.openFloatingPanelCalls,
+    };
 }
 
 function runDescriptionParityCheck(diag) {

@@ -612,7 +612,7 @@ header.osloc-simplified-viewer-toolbar button[aria-label="OS-LOC-DAT-VIZ"] {
   white-space: nowrap;
 }
 
-/* v0.0.39 inclusive event date/time filtering */
+/* v0.0.40 click-to-focus event navigation */
 .osloc-v028__date-filter {
   display: grid;
   gap: 7px;

@@ -14,6 +14,7 @@
 - GeoLibre filter fields automatically suggest the first and last corrected record date/time
 - GeoLibre About & Licenses details with bundled plugin and viewer license notices
 - Application Licenses & Third-Party Notices dialog with the full GeoLibre MIT notice
+- Clicking a GeoLibre event record now focuses its map geometry and opens its details
 - Automated coverage for import-wizard behavior, temporal KML metadata, geometry preservation, and KML/GeoJSON parity
 
 ### Changed

@@ -4,7 +4,7 @@
  */
 
 const PLUGIN_ID = "osloc-dat-viz-viewer";
-const PLUGIN_VERSION = "0.0.39";
+const PLUGIN_VERSION = "0.0.40";
 const PANEL_ID = "osloc-dat-viz-panel";
 const DETAILS_ID = "osloc-dat-viz-details";
 const LABEL_SOURCE_ID = "osloc-dat-viz-time-labels-source";
@@ -3668,6 +3668,12 @@ function getEventByKey(key) {
   return state.eventByKey.get(key) || state.events.find(e => e.key === key) || null;
 }
 
+function activateEvent(event) {
+  if (!event) return;
+  focusEvents([event]);
+  showEventDetails(event);
+}
+
 function wireEventListDelegates(list) {
   list.addEventListener("change", event => {
     const target = event.target;
@@ -3685,12 +3691,12 @@ function wireEventListDelegates(list) {
   });
 
   list.addEventListener("click", event => {
-    const target = event.target;
-    if (target?.dataset?.role !== "select-event") return;
+    const target = event.target?.closest?.("[data-role='select-event']");
+    if (!target) return;
 
     const key = target.dataset.eventKey;
     const entry = getEventByKey(key);
-    if (entry) showEventDetails(entry);
+    activateEvent(entry);
   });
 }
 
