@@ -3,30 +3,43 @@ Open Source Location Data Visualizer - github.com/btc-git/OS-LOC-DAT-VIZ
 Licensed under the GNU General Public License v3.0 - see LICENSE file for details
 """
 
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QLabel, QScrollArea, QWidget
+from PyQt6.QtWidgets import QDialog, QVBoxLayout, QLabel, QScrollArea
 from PyQt6.QtCore import Qt
 from pathlib import Path
+import sys
 
 class LicenseDialog(QDialog):
-    """Dialog to display the LICENSE file contents"""
+    """Display application and bundled third-party license notices."""
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("License - GNU GPL v3.0")
+        self.setWindowTitle("Licenses & Third-Party Notices")
         self.setMinimumSize(600, 500)
         self.setModal(True)
 
 
         layout = QVBoxLayout(self)
+
+        notice_label = QLabel(
+            "OS-LOC-DAT-VIZ is licensed under GNU GPL v3.0. This distribution "
+            "also packages the unmodified GeoLibre Desktop 3.0.0 application "
+            "for viewer functionality; GeoLibre is separately licensed under "
+            "the MIT License. Complete license texts follow."
+        )
+        notice_label.setWordWrap(True)
+        notice_label.setStyleSheet("color: #cccccc; padding: 4px 2px 8px 2px;")
+        layout.addWidget(notice_label)
+
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         # License label
         license_text = self._read_license()
-        license_label = QLabel(license_text)
-        license_label.setWordWrap(True)
-        license_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        license_label.setStyleSheet("""
+        self.license_label = QLabel(license_text)
+        self.license_label.setTextFormat(Qt.TextFormat.PlainText)
+        self.license_label.setWordWrap(True)
+        self.license_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.license_label.setStyleSheet("""
             QLabel {
                 background-color: #1e1e1e;
                 color: #cccccc;
@@ -37,7 +50,7 @@ class LicenseDialog(QDialog):
                 font-size: 10pt;
             }
         """)
-        scroll_area.setWidget(license_label)
+        scroll_area.setWidget(self.license_label)
         layout.addWidget(scroll_area)
 
         # Close button
@@ -66,16 +79,33 @@ class LicenseDialog(QDialog):
         button_layout.addStretch()
         layout.addLayout(button_layout)
 
-    def _read_license(self):
-        # Try to find LICENSE file in the same directory as the executable or script
-        possible_paths = [
-            Path(__file__).parent / "LICENSE",
-            Path(__file__).parent.parent / "LICENSE"
+    @staticmethod
+    def _read_resource(relative_path):
+        roots = [
+            Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent)),
+            Path(__file__).resolve().parent,
+            Path(__file__).resolve().parent.parent,
         ]
-        for path in possible_paths:
-            if path.exists():
+        for root in roots:
+            path = root / relative_path
+            if path.is_file():
                 try:
                     return path.read_text(encoding="utf-8")
-                except Exception:
+                except OSError:
                     continue
-        return "License file not found. Please see the repository for details."
+        return f"License file not found: {relative_path}"
+
+    def _read_license(self):
+        project_license = self._read_resource("LICENSE")
+        geolibre_license = self._read_resource(
+            Path("GeoLibre-Viewer") / "LICENSE-GeoLibre.txt"
+        )
+        separator = "=" * 72
+        return (
+            "OS-LOC-DAT-VIZ - GNU GPL v3.0\n"
+            "https://github.com/btc-git/OS-LOC-DAT-VIZ\n\n"
+            f"{project_license.rstrip()}\n\n"
+            f"{separator}\n\n"
+            "BUNDLED THIRD-PARTY SOFTWARE\n\n"
+            f"{geolibre_license.rstrip()}\n"
+        )

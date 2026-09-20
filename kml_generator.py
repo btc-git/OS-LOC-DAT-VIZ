@@ -1257,9 +1257,14 @@ class KMLGenerator(QThread):
                         )
 
                         if year_first:
-                            year, month, day = (
-                                first_value, second_value, third_value
-                            )
+                            if source_date_order == 'YDM':
+                                year, day, month = (
+                                    first_value, second_value, third_value
+                                )
+                            else:
+                                year, month, day = (
+                                    first_value, second_value, third_value
+                                )
                         elif '.' in timestamp_str_clean:
                             day, month, year = (
                                 first_value, second_value, third_value

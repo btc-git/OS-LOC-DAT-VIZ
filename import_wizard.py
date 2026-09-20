@@ -4,15 +4,17 @@ Licensed under the GNU General Public License v3.0 - see LICENSE file for detail
 """
 
 import re
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pandas as pd
-from PyQt6.QtCore import QDateTime, QTime, Qt, pyqtSignal
+from PyQt6.QtCore import QDateTime, QThread, QTime, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QDragEnterEvent, QDropEvent, QGuiApplication
 from PyQt6.QtWidgets import (
-    QCheckBox, QComboBox, QDateTimeEdit, QDialog, QDialogButtonBox,
+    QApplication, QCheckBox, QComboBox, QDateTimeEdit, QDialog, QDialogButtonBox,
     QFileDialog, QFrame, QGridLayout, QGroupBox, QHBoxLayout, QLabel,
-    QMessageBox, QPushButton, QSpinBox, QTableWidget, QTableWidgetItem,
+    QMessageBox, QProgressBar, QPushButton, QSpinBox, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QScrollArea, QWidget,
 )
 
@@ -38,6 +40,83 @@ FIXED_UTC_OFFSETS = [
 ]
 
 
+class SourceFileLoadWorker(QThread):
+    """Read source-file metadata or records without blocking the Qt UI thread."""
+
+    result_ready = pyqtSignal(object)
+    load_error = pyqtSignal(str)
+
+    def __init__(self, file_path, sheet_name=None, header_row=0,
+                 inspect_only=False, parent=None):
+        super().__init__(parent)
+        self.file_path = str(file_path)
+        self.sheet_name = sheet_name
+        self.header_row = header_row
+        self.inspect_only = inspect_only
+
+    @staticmethod
+    def read_source(file_path, sheet_name=None, header_row=0,
+                    inspect_only=False):
+        suffix = Path(file_path).suffix.lower()
+        if inspect_only:
+            if suffix == '.xlsx':
+                dataframe = pd.read_excel(
+                    file_path, nrows=1, engine='openpyxl'
+                )
+            elif suffix == '.xls':
+                dataframe = pd.read_excel(file_path, nrows=1)
+            elif suffix == '.csv':
+                dataframe = pd.read_csv(file_path, nrows=1)
+            else:
+                raise ValueError(
+                    f"Unsupported file format: {suffix}. Please use .csv, .xls, or .xlsx files."
+                )
+            return {
+                'file_path': str(file_path),
+                'dataframe': dataframe,
+            }
+
+        if suffix in ('.xls', '.xlsx'):
+            with pd.ExcelFile(file_path) as workbook:
+                sheet_names = list(workbook.sheet_names)
+                selected_sheet = sheet_name or sheet_names[0]
+                raw_dataframe = workbook.parse(
+                    sheet_name=selected_sheet, header=None
+                )
+            return {
+                'file_path': str(file_path),
+                'sheet_names': sheet_names,
+                'sheet_name': selected_sheet,
+                'raw_dataframe': raw_dataframe,
+                'dataframe': None,
+            }
+
+        if suffix == '.csv':
+            return {
+                'file_path': str(file_path),
+                'sheet_names': ['CSV'],
+                'sheet_name': 'CSV',
+                'raw_dataframe': None,
+                'dataframe': pd.read_csv(file_path, header=header_row),
+            }
+
+        raise ValueError(
+            f"Unsupported file format: {suffix}. Please use .csv, .xls, or .xlsx files."
+        )
+
+    def run(self):
+        try:
+            result = self.read_source(
+                self.file_path,
+                sheet_name=self.sheet_name,
+                header_row=self.header_row,
+                inspect_only=self.inspect_only,
+            )
+            self.result_ready.emit(result)
+        except Exception as error:
+            self.load_error.emit(str(error))
+
+
 def timezone_choice_data(timezone_name=None, fixed_offset_minutes=None,
                          no_change=False):
     return {
@@ -51,6 +130,13 @@ def fixed_offset_label(minutes):
     sign = '+' if minutes >= 0 else '-'
     hours, remainder = divmod(abs(minutes), 60)
     return f"Fixed UTC{sign}{hours:02d}:{remainder:02d}"
+
+
+class ScrollSafeComboBox(QComboBox):
+    """Let the containing page scroll without changing the selected item."""
+
+    def wheelEvent(self, event):
+        event.ignore()
 
 
 class ImportFileDropZone(QFrame):
@@ -127,6 +213,9 @@ class ImportFileDropZone(QFrame):
 class ImportWizardDialog(QDialog):
     """Map columns from original records into the application's data model."""
 
+    source_loading_finished = pyqtSignal(bool)
+    TIMESTAMP_EDGE_SCAN_LIMIT = 100
+
     FIELD_ALIASES = {
         'Timestamp': ['timestamp', 'date time', 'datetime', 'start datetime', 'starttime',
                       'record open date time', 'msg send date', 'message send date'],
@@ -172,6 +261,12 @@ class ImportWizardDialog(QDialog):
         self.selected_header_row = 1
         self.mapping_combos = {}
         self.mapping_labels = {}
+        self._cached_source_key = None
+        self._cached_raw_dataframe = None
+        self._reloading_source = False
+        self._source_loader = None
+        self._source_load_token = 0
+        self._background_loading_enabled = True
         self.setup_ui()
         self.apply_initial_size()
 
@@ -194,6 +289,15 @@ class ImportWizardDialog(QDialog):
         self.drop_zone.file_dropped.connect(self.load_file)
         self.drop_zone.browse_requested.connect(self.browse_file)
         source_layout.addWidget(self.drop_zone)
+        self.source_load_status = QLabel("Reading records...")
+        self.source_load_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.source_load_status.setVisible(False)
+        source_layout.addWidget(self.source_load_status)
+        self.source_load_progress = QProgressBar()
+        self.source_load_progress.setRange(0, 0)
+        self.source_load_progress.setTextVisible(False)
+        self.source_load_progress.setVisible(False)
+        source_layout.addWidget(self.source_load_progress)
         content_layout.addWidget(source_group)
 
         options_layout = QGridLayout()
@@ -205,10 +309,17 @@ class ImportWizardDialog(QDialog):
         self.header_row_spinbox = QSpinBox()
         self.header_row_spinbox.setRange(1, 100)
         self.header_row_spinbox.setValue(1)
+        self.header_row_spinbox.setToolTip(
+            "Changing the header row reloads the source preview automatically."
+        )
+        self._header_reload_timer = QTimer(self)
+        self._header_reload_timer.setSingleShot(True)
+        self._header_reload_timer.setInterval(250)
+        self._header_reload_timer.timeout.connect(self.reload_source)
+        self.header_row_spinbox.valueChanged.connect(
+            lambda _value: self._header_reload_timer.start()
+        )
         options_layout.addWidget(self.header_row_spinbox, 0, 3)
-        reload_button = QPushButton("Reload")
-        reload_button.clicked.connect(self.reload_source)
-        options_layout.addWidget(reload_button, 0, 4)
 
         options_layout.addWidget(QLabel("Record type:"), 1, 0)
         self.record_type_combo = QComboBox()
@@ -226,6 +337,7 @@ class ImportWizardDialog(QDialog):
         content_layout.addLayout(options_layout)
 
         mapping_group = QGroupBox("Column Mapping")
+        self.mapping_group = mapping_group
         mapping_layout = QGridLayout(mapping_group)
         mapping_layout.addWidget(QLabel("Application field"), 0, 0)
         mapping_layout.addWidget(QLabel("Source column"), 0, 1)
@@ -243,36 +355,48 @@ class ImportWizardDialog(QDialog):
         mapping_layout.addWidget(self.mapping_note, len(self.FIELD_ALIASES) + 1, 0, 1, 2)
         content_layout.addWidget(mapping_group)
 
-        timezone_group = QGroupBox("Source Timestamp Interpretation")
+        timezone_group = QGroupBox("Timestamp Interpretation and Display")
+        self.timezone_group = timezone_group
         timezone_layout = QGridLayout(timezone_group)
-        timezone_layout.addWidget(QLabel("Records are in:"), 0, 0)
-        self.source_timezone_combo = QComboBox()
+        timezone_layout.addWidget(QLabel("Source timestamps are in:"), 0, 0)
+        self.source_timezone_combo = ScrollSafeComboBox()
         timezone_layout.addWidget(self.source_timezone_combo, 0, 1)
 
-        timezone_layout.addWidget(QLabel("Records are changed to:"), 0, 2)
-        self.target_timezone_combo = QComboBox()
+        timezone_layout.addWidget(QLabel("Display timestamps as:"), 0, 2)
+        self.target_timezone_combo = ScrollSafeComboBox()
         timezone_layout.addWidget(self.target_timezone_combo, 0, 3)
         self.populate_timezone_choices(self.source_timezone_combo)
         self.populate_timezone_choices(
             self.target_timezone_combo, include_no_change=True
         )
+        self.reset_timezone_defaults()
         self.source_timezone_combo.currentIndexChanged.connect(self.update_timezone_controls)
         self.target_timezone_combo.currentIndexChanged.connect(self.update_timezone_controls)
-        self.target_timezone_combo.setCurrentIndex(0)
-        date_order_label = QLabel("Ambiguous slash/dash date order:")
-        date_order_label.setToolTip(
-            "Controls dates such as 04/10/2026 or 04-10-2026. "
-            "Year-first and unambiguous dates are detected automatically."
-        )
+        date_order_label = QLabel("Date format in source records:")
         timezone_layout.addWidget(date_order_label, 1, 0)
         self.date_order_combo = QComboBox()
         self.date_order_combo.addItem(
-            "Month/Day/Year (MM/DD/YYYY or MM-DD-YYYY)", "MDY"
+            "Year-Month-Day (YYYY-MM-DD or YYYY/MM/DD)", "YMD"
         )
         self.date_order_combo.addItem(
-            "Day/Month/Year (DD/MM/YYYY or DD-MM-YYYY)", "DMY"
+            "Year-Day-Month (YYYY-DD-MM or YYYY/DD/MM)", "YDM"
+        )
+        self.date_order_combo.addItem(
+            "Month-Day-Year (MM-DD-YYYY or MM/DD/YYYY)", "MDY"
+        )
+        self.date_order_combo.addItem(
+            "Day-Month-Year (DD-MM-YYYY or DD/MM/YYYY)", "DMY"
+        )
+        self.date_order_combo.setCurrentIndex(
+            self.date_order_combo.findData(self.selected_date_order)
         )
         timezone_layout.addWidget(self.date_order_combo, 1, 1, 1, 3)
+        date_order_note = QLabel(
+            "Choose the date order shown in the mapped source timestamp. "
+            "A likely order is selected automatically; confirm it against the source records."
+        )
+        date_order_note.setWordWrap(True)
+        timezone_layout.addWidget(date_order_note, 2, 1, 1, 3)
         timezone_note = QLabel(
             "Select the timezone used in the original records and the timezone you want those times displayed in. "
             "No Change keeps the source timezone for display. "
@@ -280,10 +404,11 @@ class ImportWizardDialog(QDialog):
             "Explicit timezone information in a mapped timestamp takes precedence."
         )
         timezone_note.setWordWrap(True)
-        timezone_layout.addWidget(timezone_note, 2, 0, 1, 4)
+        timezone_layout.addWidget(timezone_note, 3, 0, 1, 4)
         content_layout.addWidget(timezone_group)
 
         filter_group = QGroupBox("Date/Time Range Filter")
+        self.filter_group = filter_group
         filter_layout = QGridLayout(filter_group)
         self.filter_enabled_checkbox = QCheckBox("Import only records within this inclusive range")
         self.filter_enabled_checkbox.toggled.connect(self.update_filter_controls)
@@ -311,6 +436,7 @@ class ImportWizardDialog(QDialog):
         self.filter_preview_button.clicked.connect(self.preview_filter_results)
         filter_layout.addWidget(self.filter_preview_button, 1, 4)
         filter_note = QLabel(
+            "When readable timestamps are mapped, this range is filled from the first and last readable records. "
             "By default, the full start and end days are included. Exact times use the timestamp interpretation selected above."
         )
         filter_note.setWordWrap(True)
@@ -321,12 +447,25 @@ class ImportWizardDialog(QDialog):
         content_layout.addWidget(filter_group)
         for combo in self.mapping_combos.values():
             combo.currentIndexChanged.connect(self.invalidate_filter_preview)
+        for field in ('Timestamp', 'Date', 'Time'):
+            self.mapping_combos[field].currentIndexChanged.connect(
+                self.refresh_timestamp_defaults
+            )
         for combo in (
             self.record_type_combo, self.timestamp_layout_combo,
             self.source_timezone_combo, self.target_timezone_combo,
             self.date_order_combo,
         ):
             combo.currentIndexChanged.connect(self.invalidate_filter_preview)
+        self.timestamp_layout_combo.currentIndexChanged.connect(
+            self.refresh_timestamp_defaults
+        )
+        self.date_order_combo.currentIndexChanged.connect(
+            lambda _index: self.update_filter_controls()
+        )
+        self.date_order_combo.currentIndexChanged.connect(
+            self.populate_filter_range_from_source
+        )
         self.filter_start_edit.dateTimeChanged.connect(self.invalidate_filter_preview)
         self.filter_end_edit.dateTimeChanged.connect(self.invalidate_filter_preview)
         self.filter_exact_times_checkbox.toggled.connect(self.invalidate_filter_preview)
@@ -371,11 +510,14 @@ class ImportWizardDialog(QDialog):
         content_scroll.setWidget(content_container)
         layout.addWidget(content_scroll, 1)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Ok)
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Import Records")
-        buttons.accepted.connect(self.accept_import)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        self.dialog_buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Cancel |
+            QDialogButtonBox.StandardButton.Ok
+        )
+        self.dialog_buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Import Records")
+        self.dialog_buttons.accepted.connect(self.accept_import)
+        self.dialog_buttons.rejected.connect(self.reject)
+        layout.addWidget(self.dialog_buttons)
         self.update_mapping_requirements()
         self.update_timezone_controls()
 
@@ -409,6 +551,19 @@ class ImportWizardDialog(QDialog):
                 timezone_choice_data(fixed_offset_minutes=minutes),
             )
 
+    def reset_timezone_defaults(self):
+        """Start each newly selected record set in UTC without display conversion."""
+        for index in range(self.source_timezone_combo.count()):
+            selection = self.source_timezone_combo.itemData(index) or {}
+            if selection.get('timezone_name') == 'UTC':
+                self.source_timezone_combo.setCurrentIndex(index)
+                break
+        for index in range(self.target_timezone_combo.count()):
+            selection = self.target_timezone_combo.itemData(index) or {}
+            if selection.get('no_change'):
+                self.target_timezone_combo.setCurrentIndex(index)
+                break
+
     @staticmethod
     def timezone_selection(combo):
         selection = combo.currentData() or {}
@@ -427,27 +582,147 @@ class ImportWizardDialog(QDialog):
         if file_path:
             self.load_file(file_path)
 
-    def load_file(self, file_path):
+    def load_file(self, file_path, background=True):
+        self.reset_timezone_defaults()
         self.source_path = file_path
+        self.source_dataframe = None
+        self._cached_source_key = None
+        self._cached_raw_dataframe = None
+        self._background_loading_enabled = background
         self.drop_zone.set_selected_filename(Path(file_path).name)
+        self.preview_table.setRowCount(0)
+        self.preview_table.setColumnCount(0)
+        self._load_source_records(background=background)
+
+    def _load_source_records(self, sheet_name=None, background=True):
+        """Load one source worksheet, optionally on a background thread."""
+        if not self.source_path:
+            return
+
+        self._source_load_token += 1
+        token = self._source_load_token
+        header_row = self.header_row_spinbox.value() - 1
+        self.set_source_loading(True)
+        if not background:
+            try:
+                result = SourceFileLoadWorker.read_source(
+                    self.source_path,
+                    sheet_name=sheet_name,
+                    header_row=header_row,
+                )
+            except Exception as error:
+                self.on_source_load_error(str(error), token)
+            else:
+                self.on_source_load_result(result, token)
+            return
+
+        worker = SourceFileLoadWorker(
+            self.source_path,
+            sheet_name=sheet_name,
+            header_row=header_row,
+            parent=QApplication.instance(),
+        )
+        self._source_loader = worker
+        worker.result_ready.connect(
+            lambda result, load_token=token: self.on_source_load_result(
+                result, load_token
+            )
+        )
+        worker.load_error.connect(
+            lambda message, load_token=token: self.on_source_load_error(
+                message, load_token
+            )
+        )
+        worker.finished.connect(worker.deleteLater)
+        worker.finished.connect(
+            lambda load_worker=worker: self.on_source_loader_finished(
+                load_worker
+            )
+        )
+        worker.start()
+
+    def set_source_loading(self, loading):
+        """Show source-read progress and prevent edits against partial data."""
+        self.source_load_status.setVisible(loading)
+        self.source_load_progress.setVisible(loading)
+        self.drop_zone.setEnabled(not loading)
+        self.header_row_spinbox.setEnabled(not loading)
+        self.record_type_combo.setEnabled(not loading)
+        self.timestamp_layout_combo.setEnabled(not loading)
+        self.mapping_group.setEnabled(not loading)
+        self.timezone_group.setEnabled(not loading)
+        self.filter_group.setEnabled(not loading)
+        self.preview_table.setEnabled(not loading)
+        is_excel = bool(
+            self.source_path and
+            Path(self.source_path).suffix.lower() in ('.xls', '.xlsx')
+        )
+        self.sheet_combo.setEnabled(not loading and is_excel)
+        self.dialog_buttons.button(
+            QDialogButtonBox.StandardButton.Ok
+        ).setEnabled(not loading and self.source_dataframe is not None)
+
+    def on_source_load_result(self, result, token):
+        """Apply records returned by the active source worker."""
+        if token != self._source_load_token:
+            return
+
+        sheet_names = result['sheet_names']
+        selected_sheet = result['sheet_name']
         self.sheet_combo.blockSignals(True)
         self.sheet_combo.clear()
+        self.sheet_combo.addItems(sheet_names)
+        self.sheet_combo.setCurrentIndex(
+            self.sheet_combo.findText(selected_sheet)
+        )
+        self.sheet_combo.blockSignals(False)
+
+        raw_dataframe = result['raw_dataframe']
+        if raw_dataframe is not None:
+            self._cached_source_key = (self.source_path, selected_sheet)
+            self._cached_raw_dataframe = raw_dataframe
+            self.source_dataframe = self.dataframe_from_header_row(
+                raw_dataframe, self.header_row_spinbox.value() - 1
+            )
+        else:
+            self._cached_source_key = None
+            self._cached_raw_dataframe = None
+            self.source_dataframe = result['dataframe']
+
+        self.populate_loaded_source()
+        self.set_source_loading(False)
+        self.source_loading_finished.emit(True)
+
+    def on_source_load_error(self, message, token):
+        """Restore the dialog after a background source-read failure."""
+        if token != self._source_load_token:
+            return
+        self.source_dataframe = None
+        self.source_path = None
+        self.drop_zone.set_selected_filename(None)
+        self.set_source_loading(False)
+        self.source_loading_finished.emit(False)
+        QMessageBox.critical(
+            self,
+            "Import Error",
+            f"Could not read the selected data:\n\n{message}",
+        )
+
+    def on_source_loader_finished(self, worker):
+        """Release the completed source worker reference."""
+        if self._source_loader is worker:
+            self._source_loader = None
+
+    def populate_loaded_source(self):
+        """Populate mappings and previews after source records are available."""
+        self._reloading_source = True
         try:
-            if Path(file_path).suffix.lower() in ('.xls', '.xlsx'):
-                with pd.ExcelFile(file_path) as workbook:
-                    self.sheet_combo.addItems(workbook.sheet_names)
-                self.sheet_combo.setEnabled(True)
-            else:
-                self.sheet_combo.addItem("CSV")
-                self.sheet_combo.setEnabled(False)
-        except Exception as error:
-            QMessageBox.critical(self, "Import Error", f"Could not inspect the source file:\n\n{error}")
-            self.source_path = None
-            self.drop_zone.set_selected_filename(None)
+            self.populate_mapping_options()
+            self.populate_preview()
+            self.detect_record_type()
         finally:
-            self.sheet_combo.blockSignals(False)
-        if self.source_path:
-            self.reload_source()
+            self._reloading_source = False
+        self.refresh_timestamp_defaults()
 
     def reload_source(self):
         if not self.source_path:
@@ -456,17 +731,55 @@ class ImportWizardDialog(QDialog):
             header_row = self.header_row_spinbox.value() - 1
             suffix = Path(self.source_path).suffix.lower()
             if suffix == '.csv':
-                self.source_dataframe = pd.read_csv(self.source_path, header=header_row)
-            else:
-                self.source_dataframe = pd.read_excel(
-                    self.source_path, sheet_name=self.sheet_combo.currentText(), header=header_row
+                self._load_source_records(
+                    background=self._background_loading_enabled
                 )
-            self.populate_mapping_options()
-            self.populate_preview()
-            self.detect_record_type()
+                return
+
+            sheet_name = self.sheet_combo.currentText()
+            source_key = (self.source_path, sheet_name)
+            if self._cached_source_key != source_key:
+                self._load_source_records(
+                    sheet_name=sheet_name,
+                    background=self._background_loading_enabled,
+                )
+                return
+            self.source_dataframe = self.dataframe_from_header_row(
+                self._cached_raw_dataframe, header_row
+            )
+            self.populate_loaded_source()
         except Exception as error:
             self.source_dataframe = None
             QMessageBox.critical(self, "Import Error", f"Could not read the selected data:\n\n{error}")
+
+    @staticmethod
+    def dataframe_from_header_row(raw_dataframe, header_row):
+        """Apply an Excel header row without reparsing the workbook."""
+        if header_row >= len(raw_dataframe):
+            raise ValueError(
+                f"Header row {header_row + 1} is beyond the available worksheet rows."
+            )
+
+        columns = []
+        used_names = set()
+        for column_index, value in enumerate(raw_dataframe.iloc[header_row]):
+            base_name = (
+                f"Unnamed: {column_index}"
+                if pd.isna(value) or not str(value).strip()
+                else str(value)
+            )
+            column_name = base_name
+            duplicate_index = 1
+            while column_name in used_names:
+                column_name = f"{base_name}.{duplicate_index}"
+                duplicate_index += 1
+            columns.append(column_name)
+            used_names.add(column_name)
+
+        dataframe = raw_dataframe.iloc[header_row + 1:].copy(deep=False)
+        dataframe.columns = columns
+        dataframe.index = pd.RangeIndex(len(dataframe))
+        return dataframe
 
     def populate_mapping_options(self):
         columns = [str(column) for column in self.source_dataframe.columns]
@@ -610,11 +923,183 @@ class ImportWizardDialog(QDialog):
         self.filter_start_edit.setEnabled(enabled)
         self.filter_end_edit.setEnabled(enabled)
         self.filter_preview_button.setEnabled(enabled)
-        display_format = "MM/dd/yyyy h:mm:ss AP" if exact_times else "MM/dd/yyyy"
+        date_format = {
+            'YMD': "yyyy-MM-dd",
+            'YDM': "yyyy-dd-MM",
+            'MDY': "MM/dd/yyyy",
+            'DMY': "dd/MM/yyyy",
+        }.get(self.date_order_combo.currentData(), "MM/dd/yyyy")
+        display_format = f"{date_format} h:mm:ss AP" if exact_times else date_format
+        start_datetime = self.filter_start_edit.dateTime()
+        end_datetime = self.filter_end_edit.dateTime()
+        start_block_state = self.filter_start_edit.blockSignals(True)
+        end_block_state = self.filter_end_edit.blockSignals(True)
         self.filter_start_edit.setDisplayFormat(display_format)
         self.filter_end_edit.setDisplayFormat(display_format)
+        self.filter_start_edit.setDateTime(start_datetime)
+        self.filter_end_edit.setDateTime(end_datetime)
+        self.filter_start_edit.blockSignals(start_block_state)
+        self.filter_end_edit.blockSignals(end_block_state)
         if not enabled:
             self.filter_result_label.setText("Enable the filter to check how many rows will be retained.")
+
+    def infer_source_date_order(self):
+        """Infer a clear date order from the mapped timestamp or date column."""
+        if self.source_dataframe is None:
+            return None
+
+        if self.timestamp_layout_combo.currentData() == 'separate':
+            source_column = self.mapping_combos['Date'].currentData()
+        else:
+            source_column = self.mapping_combos['Timestamp'].currentData()
+        if not source_column:
+            return None
+
+        inferred_orders = set()
+        saw_year_first = False
+        saw_year_last = False
+        source_values = self.source_dataframe[source_column]
+        for position in self.edge_sample_positions(len(source_values)):
+            value = source_values.iloc[position]
+            if pd.isna(value):
+                continue
+            if isinstance(value, (datetime, pd.Timestamp)):
+                inferred_orders.add('YMD')
+                saw_year_first = True
+                continue
+
+            match = re.search(
+                r'(?<!\d)(\d{1,4})([-/.])(\d{1,2})\2(\d{1,4})(?!\d)',
+                str(value),
+            )
+            if not match:
+                continue
+
+            first_text, separator, second_text, third_text = match.groups()
+            first_value = int(first_text)
+            second_value = int(second_text)
+            third_value = int(third_text)
+            if len(first_text) == 4:
+                saw_year_first = True
+                if separator == '.':
+                    continue
+                if second_value > 12 and third_value <= 12:
+                    inferred_orders.add('YDM')
+                elif third_value > 12 and second_value <= 12:
+                    inferred_orders.add('YMD')
+            else:
+                saw_year_last = True
+                if separator == '.' or (first_value > 12 and second_value <= 12):
+                    inferred_orders.add('DMY')
+                elif second_value > 12 and first_value <= 12:
+                    inferred_orders.add('MDY')
+
+        if saw_year_first and saw_year_last:
+            return None
+        if len(inferred_orders) == 1:
+            return next(iter(inferred_orders))
+        if not inferred_orders and saw_year_first:
+            return 'YMD'
+        return None
+
+    @classmethod
+    def edge_sample_positions(cls, row_count):
+        """Return bounded positions from both ends of a source table."""
+        head_stop = min(row_count, cls.TIMESTAMP_EDGE_SCAN_LIMIT)
+        tail_start = max(head_stop, row_count - cls.TIMESTAMP_EDGE_SCAN_LIMIT)
+        return [*range(head_stop), *range(tail_start, row_count)]
+
+    def refresh_timestamp_defaults(self, *_args):
+        """Refresh inferred date order and source timestamp filter boundaries."""
+        if self._reloading_source:
+            return
+        inferred_order = self.infer_source_date_order()
+        if inferred_order:
+            inferred_index = self.date_order_combo.findData(inferred_order)
+            previous_block_state = self.date_order_combo.blockSignals(True)
+            self.date_order_combo.setCurrentIndex(inferred_index)
+            self.date_order_combo.blockSignals(previous_block_state)
+        self.update_filter_controls()
+        self.populate_filter_range_from_source()
+
+    def populate_filter_range_from_source(self, *_args):
+        """Set filter endpoints to the earliest and latest parseable timestamps."""
+        if self.source_dataframe is None:
+            return
+
+        mappings = self.current_mappings()
+        timestamp_fields = (
+            ('Date', 'Time')
+            if self.timestamp_layout_combo.currentData() == 'separate'
+            else ('Timestamp',)
+        )
+        if any(not mappings.get(field) for field in timestamp_fields):
+            return
+
+        timestamp_mappings = {
+            field: mappings[field] for field in timestamp_fields
+        }
+        sample_positions = self.edge_sample_positions(len(self.source_dataframe))
+        sampled_source = self.source_dataframe.iloc[sample_positions]
+        normalized = self.build_normalized_dataframe(
+            timestamp_mappings, sampled_source
+        )
+        source_timezone_name, source_offset_minutes = self.timezone_selection(
+            self.source_timezone_combo
+        )
+        parser = KMLGenerator(self.source_path, self.record_type_combo.currentData(), {
+            'source_utc_offset_minutes': source_offset_minutes,
+            'source_timezone_name': source_timezone_name,
+            'source_date_order': self.date_order_combo.currentData(),
+        })
+        def parse_first_valid(positions):
+            for position in positions:
+                row = normalized.iloc[position]
+                try:
+                    timestamp_value = parser.get_timestamp_value(row)
+                    kml_timestamp, _ = parser.parse_timestamp_to_kml(
+                        timestamp_value
+                    )
+                except TimestampResolutionError:
+                    continue
+                if kml_timestamp:
+                    return datetime.strptime(
+                        kml_timestamp, '%Y-%m-%dT%H:%M:%SZ'
+                    ).replace(tzinfo=timezone.utc)
+            return None
+
+        scan_count = min(len(normalized), self.TIMESTAMP_EDGE_SCAN_LIMIT)
+        first_timestamp = parse_first_valid(range(scan_count))
+        last_timestamp = parse_first_valid(
+            range(len(normalized) - 1, len(normalized) - scan_count - 1, -1)
+        )
+        parsed_timestamps = [
+            timestamp for timestamp in (first_timestamp, last_timestamp)
+            if timestamp is not None
+        ]
+        if not parsed_timestamps:
+            return
+
+        if source_timezone_name:
+            source_timezone = ZoneInfo(source_timezone_name)
+        else:
+            source_timezone = timezone(timedelta(minutes=source_offset_minutes))
+        start_datetime = min(parsed_timestamps).astimezone(source_timezone)
+        end_datetime = max(parsed_timestamps).astimezone(source_timezone)
+        start_qdatetime = QDateTime.fromString(
+            start_datetime.strftime('%Y-%m-%d %H:%M:%S'),
+            'yyyy-MM-dd HH:mm:ss',
+        )
+        end_qdatetime = QDateTime.fromString(
+            end_datetime.strftime('%Y-%m-%d %H:%M:%S'),
+            'yyyy-MM-dd HH:mm:ss',
+        )
+        start_block_state = self.filter_start_edit.blockSignals(True)
+        end_block_state = self.filter_end_edit.blockSignals(True)
+        self.filter_start_edit.setDateTime(start_qdatetime)
+        self.filter_end_edit.setDateTime(end_qdatetime)
+        self.filter_start_edit.blockSignals(start_block_state)
+        self.filter_end_edit.blockSignals(end_block_state)
 
     def invalidate_filter_preview(self):
         if self.filter_enabled_checkbox.isChecked():
@@ -627,9 +1112,15 @@ class ImportWizardDialog(QDialog):
         if not self.filter_exact_times_checkbox.isChecked():
             start_datetime.setTime(QTime(0, 0, 0))
             end_datetime.setTime(QTime(23, 59, 59))
+        date_format = {
+            'YMD': "yyyy-MM-dd",
+            'YDM': "yyyy-dd-MM",
+            'MDY': "MM-dd-yyyy",
+            'DMY': "dd-MM-yyyy",
+        }.get(self.date_order_combo.currentData(), "MM-dd-yyyy")
         return (
-            start_datetime.toString("yyyy-MM-dd HH:mm:ss"),
-            end_datetime.toString("yyyy-MM-dd HH:mm:ss"),
+            start_datetime.toString(f"{date_format} HH:mm:ss"),
+            end_datetime.toString(f"{date_format} HH:mm:ss"),
         )
 
     def current_mappings(self):
@@ -641,15 +1132,20 @@ class ImportWizardDialog(QDialog):
             if field in active_fields
         }
 
-    def build_normalized_dataframe(self, mappings):
+    def build_normalized_dataframe(self, mappings, source_dataframe=None):
         """Build the in-memory application columns from source mappings."""
-        normalized = pd.DataFrame(index=self.source_dataframe.index)
+        source_dataframe = (
+            self.source_dataframe
+            if source_dataframe is None
+            else source_dataframe
+        )
+        normalized = pd.DataFrame(index=source_dataframe.index)
         for field, source_column in mappings.items():
             if source_column:
                 target_field = field
                 if field == 'Time' and 'utc' in self.normalize_name(source_column).split():
                     target_field = 'Time (UTC)'
-                normalized[target_field] = self.source_dataframe[source_column]
+                normalized[target_field] = source_dataframe[source_column]
 
         timestamp_source = mappings.get('Timestamp')
         if timestamp_source and 'utc' in self.normalize_name(timestamp_source).split():

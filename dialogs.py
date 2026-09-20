@@ -120,8 +120,8 @@ class DisclaimerDialog(QDialog):
 Version {APP_VERSION}<br/>
 Open Source Location Data Visualization Tool<br/>
 <br/>
-<strong>📜 Open Source License:</strong> <a href="license://show" style="color:#4ecdc4; text-decoration:underline; cursor:pointer;">LICENSE</a> (GNU GPL v3.0)<br/>
-This software is free and open source. Distribution and modification must comply with the license terms.<br/>
+<strong>📜 Licenses &amp; Notices:</strong> <a href="license://show" style="color:#4ecdc4; text-decoration:underline; cursor:pointer;">View license texts</a><br/>
+OS-LOC-DAT-VIZ is licensed under GNU GPL v3.0 and packages GeoLibre 3.0.0 under the MIT License.<br/>
 <br/>
 <span style='color: #4ecdc4; font-size: 11pt;'>This is an open source project. Found a bug or have a suggestion? <br>Contribute or open an issue at <a href="https://github.com/btc-git/OS-LOC-DAT-VIZ" style="color:#4ecdc4; text-decoration:underline;">GitHub</a>.</span>
 </p>

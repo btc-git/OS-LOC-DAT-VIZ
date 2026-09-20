@@ -8,6 +8,12 @@
 - Paired GeoJSON output with the same event identity, temporal metadata, geometry, and display colors as KML
 - Stable `osloc_*` dataset, event, component, timezone, and epoch metadata for interoperable viewers
 - GeoLibre viewer plugin with event filtering, timeline playback, map labels, details, and focused navigation
+- Save & Open Viewer action with bundled GeoLibre Desktop, automatic plugin provisioning, and same-named project files
+- Open Viewer action for loading one or more existing KML or GeoJSON files without generating new outputs
+- Project-scoped simplified GeoLibre chrome with automatic Show All and data framing
+- GeoLibre filter fields automatically suggest the first and last corrected record date/time
+- GeoLibre About & Licenses details with bundled plugin and viewer license notices
+- Application Licenses & Third-Party Notices dialog with the full GeoLibre MIT notice
 - Automated coverage for import-wizard behavior, temporal KML metadata, geometry preservation, and KML/GeoJSON parity
 
 ### Changed
@@ -17,16 +23,17 @@
 - GeoLibre map labels now always include the full year and match event-card and popup titles
 - GeoLibre labels global, record-set, and individual framing actions as Focus All, Focus Set, and Zoom to Event
 - GeoLibre presents generated description tables as one readable detail field per line
-- GeoLibre includes inclusive From/Through date pickers with Apply and All Dates controls
-- Active GeoLibre date ranges limit map evidence, event lists, counts, Focus bounds, and the timeline slider range
+- GeoLibre includes inclusive From/Through date-and-time pickers with minute precision and Apply and All Times controls
+- Active GeoLibre date/time ranges limit map evidence, event lists, counts, Focus bounds, and the timeline slider range
 - Removed the one-minute backward and forward buttons from the GeoLibre timeline
 
 ### Fixed
+- Generated viewer projects keep the OS-LOC side panel expanded during GeoLibre project restoration
 - Hidden KML anchor points remain hidden without suppressing intentionally visible location points
 - GeoJSON timeline filters use bounded epoch comparisons instead of event-ID lists
 - Google Earth event names no longer append geometry labels such as Shaded Area to the primary event title
 - Google Earth Places entries suppress truncated description previews while retaining complete balloon details
-- GeoLibre date fields no longer jump or clear while a date is typed manually
+- GeoLibre date/time fields no longer jump or clear while a value is typed manually
 
 ## [1.2] - 2026-09-10
 

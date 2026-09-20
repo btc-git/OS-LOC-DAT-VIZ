@@ -8,11 +8,19 @@ if not xlrd_hiddenimports:
         "xlrd is required to build XLS support. Install requirements with the Python interpreter running PyInstaller."
     )
 
+viewer_datas = [
+    ('GeoLibre-Viewer/geolibre-desktop-3.0.0-x64-portable.zip', 'GeoLibre-Viewer'),
+    ('GeoLibre-Viewer/LICENSE-GeoLibre.txt', 'GeoLibre-Viewer'),
+    ('GeoLibre-Plugin/plugin.json', 'GeoLibre-Plugin'),
+    ('GeoLibre-Plugin/dist/index.js', 'GeoLibre-Plugin/dist'),
+    ('GeoLibre-Plugin/dist/style.css', 'GeoLibre-Plugin/dist'),
+]
+
 a = Analysis(
     ['app.py'],
     pathex=[],
     binaries=xlrd_binaries,
-    datas=[('LICENSE', '.')] + collect_data_files('tzdata') + xlrd_datas,
+    datas=[('LICENSE', '.')] + collect_data_files('tzdata') + xlrd_datas + viewer_datas,
     hiddenimports=xlrd_hiddenimports,
     hookspath=[],
     hooksconfig={},

@@ -3,7 +3,6 @@ Open Source Location Data Visualizer - github.com/btc-git/OS-LOC-DAT-VIZ
 Licensed under the GNU General Public License v3.0 - see LICENSE file for details
 """
 
-import pandas as pd
 import hashlib
 import re
 import subprocess
@@ -17,17 +16,27 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QSpinBox, QDoubleSpinBox, QRadioButton, QButtonGroup, 
                              QTextEdit, QGroupBox, QColorDialog, QProgressBar, 
                              QMessageBox, QTabWidget, QCheckBox, QMenu, QComboBox, QLineEdit, QFrame, QScrollArea)
-from PyQt6.QtCore import Qt, QSettings
+from PyQt6.QtCore import Qt, QSettings, pyqtSignal
 from PyQt6.QtGui import QFont, QColor, QIcon, QPixmap, QPainter, QPen
 
 from dialogs import DisclaimerDialog
-from import_wizard import ImportWizardDialog
+from geolibre_launcher import GeoLibreLaunchWorker
+from import_wizard import (
+    FIXED_UTC_OFFSETS,
+    NAMED_TIMEZONE_CHOICES,
+    ImportWizardDialog,
+    SourceFileLoadWorker,
+    fixed_offset_label,
+    timezone_choice_data,
+)
 from widgets import DragDropWidget
 from kml_generator import KMLGenerator
 from version import APP_VERSION
 
 
 class MainWindow(QMainWindow):
+    file_inspection_finished = pyqtSignal(bool)
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Open Source Location Data Visualizer")
@@ -49,6 +58,12 @@ class MainWindow(QMainWindow):
         self.current_generation_source_file = None
         self.current_import_metadata = None
         self.generation_started_utc = None
+        self.open_viewer_after_generation = False
+        self.viewer_launcher = None
+        self.pending_viewer_geojson_path = None
+        self.restore_generation_actions_after_viewer = False
+        self.file_inspector = None
+        self.pending_inspection_path = None
         self.settings = QSettings("OpenSource", "LocationDataVisualizer")
         
         # Set up UI
@@ -61,7 +76,7 @@ class MainWindow(QMainWindow):
         # Add welcome message
         self.add_status_message("Drag and drop a CSV or Excel file, or click 'Browse for File', to begin.")
         self.add_status_message("Standard templates are detected automatically; other files open the column-mapping wizard.")
-        self.add_status_message("Adjust settings and colors, then click 'Generate Output Files' to create KML and GeoJSON exports.")
+        self.add_status_message("Adjust settings and colors, then save outputs or save and open them in the included viewer.")
         self.add_status_message("Each generation includes same-named KML, GeoJSON, and TXT files for review.")
 
 
@@ -416,57 +431,78 @@ class MainWindow(QMainWindow):
         viz_layout.addWidget(self.duration_spinbox, row, 1)
         row += 1
 
-        source_timezone_label = QLabel("Source Timestamp Timezone:")
-        source_timezone_label.setToolTip("Use a named timezone for automatic historical daylight-saving conversion")
+        source_timezone_label = QLabel("Source timestamps are in:")
+        source_timezone_label.setToolTip(
+            "Custom imports copy the source interpretation selected in Import Records. "
+            "This value is used when generating output."
+        )
         viz_layout.addWidget(source_timezone_label, row, 0)
         self.source_timezone_combo = QComboBox()
         self.source_timezone_combo.addItem("Fixed UTC offset", None)
-        self.source_timezone_combo.addItem("US Eastern (America/New_York)", "America/New_York")
-        self.source_timezone_combo.addItem("US Central (America/Chicago)", "America/Chicago")
-        self.source_timezone_combo.addItem("US Mountain (America/Denver)", "America/Denver")
-        self.source_timezone_combo.addItem("Arizona (America/Phoenix)", "America/Phoenix")
-        self.source_timezone_combo.addItem("US Pacific (America/Los_Angeles)", "America/Los_Angeles")
-        self.source_timezone_combo.addItem("Alaska (America/Anchorage)", "America/Anchorage")
-        self.source_timezone_combo.addItem("Hawaii (Pacific/Honolulu)", "Pacific/Honolulu")
+        for label, timezone_name in NAMED_TIMEZONE_CHOICES:
+            self.source_timezone_combo.addItem(label, timezone_name)
         viz_layout.addWidget(self.source_timezone_combo, row, 1)
         row += 1
 
-        source_offset_label = QLabel("Source Timestamp UTC Offset:")
-        source_offset_label.setToolTip("Fallback offset for timestamps without timezone information; explicit offsets in the data take precedence")
-        viz_layout.addWidget(source_offset_label, row, 0)
+        self.source_offset_label = QLabel("Fixed source UTC offset:")
+        self.source_offset_label.setToolTip(
+            "Used only when Source timestamps are in is set to Fixed UTC offset. "
+            "Explicit offsets in source records take precedence."
+        )
+        viz_layout.addWidget(self.source_offset_label, row, 0)
         self.source_utc_offset_combo = QComboBox()
-        utc_offsets = [
-            (-720, "UTC -12:00"), (-660, "UTC -11:00"), (-600, "UTC -10:00"),
-            (-570, "UTC -09:30"), (-540, "UTC -09:00 (AKST)"), (-480, "UTC -08:00 (PST)"),
-            (-420, "UTC -07:00 (MST / PDT)"), (-360, "UTC -06:00 (CST / MDT)"),
-            (-300, "UTC -05:00 (EST / CDT)"), (-240, "UTC -04:00 (EDT / AST)"),
-            (-210, "UTC -03:30"), (-180, "UTC -03:00"),
-            (-120, "UTC -02:00"), (-60, "UTC -01:00"), (0, "UTC +00:00"),
-            (60, "UTC +01:00"), (120, "UTC +02:00"), (180, "UTC +03:00"),
-            (210, "UTC +03:30"), (240, "UTC +04:00"), (270, "UTC +04:30"),
-            (300, "UTC +05:00"), (330, "UTC +05:30"), (345, "UTC +05:45"),
-            (360, "UTC +06:00"), (390, "UTC +06:30"), (420, "UTC +07:00"),
-            (480, "UTC +08:00"), (525, "UTC +08:45"), (540, "UTC +09:00"),
-            (570, "UTC +09:30"), (600, "UTC +10:00"), (630, "UTC +10:30"),
-            (660, "UTC +11:00"), (720, "UTC +12:00"), (765, "UTC +12:45"),
-            (780, "UTC +13:00"), (825, "UTC +13:45"), (840, "UTC +14:00"),
-        ]
-        for offset_minutes, label in utc_offsets:
-            self.source_utc_offset_combo.addItem(label, offset_minutes)
+        for offset_minutes in FIXED_UTC_OFFSETS:
+            self.source_utc_offset_combo.addItem(
+                fixed_offset_label(offset_minutes), offset_minutes
+            )
         self.source_utc_offset_combo.setCurrentIndex(self.source_utc_offset_combo.findData(0))
         viz_layout.addWidget(self.source_utc_offset_combo, row, 1)
         self.source_timezone_combo.currentIndexChanged.connect(
-            lambda: self.source_utc_offset_combo.setEnabled(self.source_timezone_combo.currentData() is None)
+            self.update_source_timestamp_controls
         )
         row += 1
 
-        date_order_label = QLabel("Slash/Dash Date Order:")
-        date_order_label.setToolTip("Controls ambiguous numeric dates such as 04/10/2019 or 04-10-2019; ISO year-first dates are unaffected")
+        target_timezone_label = QLabel("Display timestamps as:")
+        target_timezone_label.setToolTip(
+            "Custom imports copy the display timezone selected in Import Records. "
+            "No Change preserves the source timezone in output labels."
+        )
+        viz_layout.addWidget(target_timezone_label, row, 0)
+        self.target_timezone_combo = QComboBox()
+        self.target_timezone_combo.addItem(
+            "No Change", timezone_choice_data(no_change=True)
+        )
+        for label, timezone_name in NAMED_TIMEZONE_CHOICES:
+            self.target_timezone_combo.addItem(
+                label, timezone_choice_data(timezone_name=timezone_name)
+            )
+        for offset_minutes in FIXED_UTC_OFFSETS:
+            self.target_timezone_combo.addItem(
+                fixed_offset_label(offset_minutes),
+                timezone_choice_data(fixed_offset_minutes=offset_minutes),
+            )
+        self.target_timezone_combo.currentIndexChanged.connect(
+            self.update_target_timestamp_selection
+        )
+        viz_layout.addWidget(self.target_timezone_combo, row, 1)
+        row += 1
+
+        date_order_label = QLabel("Source Date Format:")
+        date_order_label.setToolTip(
+            "Match the date order used in source timestamps; dash and slash separators are supported"
+        )
         viz_layout.addWidget(date_order_label, row, 0)
         self.source_date_order_combo = QComboBox()
-        self.source_date_order_combo.addItem("Month/Day/Year (MM/DD/YYYY or MM-DD-YYYY)", "MDY")
-        self.source_date_order_combo.addItem("Day/Month/Year (DD/MM/YYYY or DD-MM-YYYY)", "DMY")
+        self.source_date_order_combo.addItem("Year-Month-Day (YYYY-MM-DD or YYYY/MM/DD)", "YMD")
+        self.source_date_order_combo.addItem("Year-Day-Month (YYYY-DD-MM or YYYY/DD/MM)", "YDM")
+        self.source_date_order_combo.addItem("Month-Day-Year (MM-DD-YYYY or MM/DD/YYYY)", "MDY")
+        self.source_date_order_combo.addItem("Day-Month-Year (DD-MM-YYYY or DD/MM/YYYY)", "DMY")
+        self.source_date_order_combo.setCurrentIndex(
+            self.source_date_order_combo.findData("MDY")
+        )
         viz_layout.addWidget(self.source_date_order_combo, row, 1)
+        self.update_source_timestamp_controls()
+        self.update_target_timestamp_selection()
         row += 1
         
         # Add stretch to push controls to top and provide breathing room
@@ -542,12 +578,12 @@ class MainWindow(QMainWindow):
         self.progress_bar.setVisible(False)
         layout.addWidget(self.progress_bar, 0)  # No stretch for progress bar
         
-        # Generate button
-        self.generate_button = QPushButton("Generate Output Files")
-        self.generate_button.clicked.connect(self.generate_kml)
-        self.generate_button.setEnabled(False)
+        # Generation actions
+        self.generate_button = QPushButton("Process")
+        self.generate_button.setToolTip("Process and save paired KML, GeoJSON, and TXT output files")
+        self.generate_button.clicked.connect(lambda: self.generate_kml(open_viewer=False))
         self.generate_button.setMinimumHeight(30)
-        self.generate_button.setMinimumWidth(200)
+        self.generate_button.setMinimumWidth(145)
         self.generate_button.setStyleSheet("""
             QPushButton {
                 font-size: 16px;
@@ -569,13 +605,72 @@ class MainWindow(QMainWindow):
                 color: #888888;
             }
         """)
+
+        self.viewer_button = QPushButton("Process and Open Viewer")
+        self.viewer_button.setToolTip("Process all output files, then open the GeoJSON in the included GeoLibre viewer")
+        self.viewer_button.clicked.connect(lambda: self.generate_kml(open_viewer=True))
+        self.viewer_button.setMinimumHeight(30)
+        self.viewer_button.setMinimumWidth(188)
+        self.viewer_button.setStyleSheet("""
+            QPushButton {
+                font-size: 16px;
+                font-weight: bold;
+                background-color: #237a57;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 12px;
+            }
+            QPushButton:hover {
+                background-color: #2b9168;
+            }
+            QPushButton:pressed {
+                background-color: #195e42;
+            }
+            QPushButton:disabled {
+                background-color: #555555;
+                color: #888888;
+            }
+        """)
+
+        self.open_viewer_button = QPushButton("Open Viewer")
+        self.open_viewer_button.setToolTip(
+            "Open the included viewer for existing KML or GeoJSON files"
+        )
+        self.open_viewer_button.clicked.connect(self.open_geolibre_viewer)
+        self.open_viewer_button.setMinimumHeight(30)
+        self.open_viewer_button.setMinimumWidth(135)
+        self.open_viewer_button.setStyleSheet("""
+            QPushButton {
+                font-size: 16px;
+                font-weight: bold;
+                background-color: #596773;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 12px;
+            }
+            QPushButton:hover {
+                background-color: #6a7a88;
+            }
+            QPushButton:pressed {
+                background-color: #46515b;
+            }
+            QPushButton:disabled {
+                background-color: #555555;
+                color: #888888;
+            }
+        """)
+        self.set_generation_actions_enabled(False)
         
-        # Create horizontal layout to center the button
+        # Create horizontal layout to center the actions
         button_layout = QHBoxLayout()
         button_layout.addStretch()
         button_layout.addWidget(self.generate_button)
+        button_layout.addWidget(self.viewer_button)
+        button_layout.addWidget(self.open_viewer_button)
         button_layout.addStretch()
-        layout.addLayout(button_layout, 0)  # No stretch for button
+        layout.addLayout(button_layout, 0)  # No stretch for buttons
         
         # Status text
         self.status_text = QTextEdit()
@@ -587,7 +682,7 @@ class MainWindow(QMainWindow):
         # Footer with version info (clickable links)
         footer_layout = QHBoxLayout()
         footer_layout.setContentsMargins(0, 2, 0, 2)  # Minimal top and bottom margins
-        version_label = QLabel(f'v{APP_VERSION} | <a href="https://github.com/btc-git/OS-LOC-DAT-VIZ" style="color: #4ecdc4; text-decoration: none;">Open Source Location Data Visualizer</a> | <a href="license://show" style="color: #4ecdc4; text-decoration: none;">GPL v3.0</a>')
+        version_label = QLabel(f'v{APP_VERSION} | <a href="https://github.com/btc-git/OS-LOC-DAT-VIZ" style="color: #4ecdc4; text-decoration: none;">Open Source Location Data Visualizer</a> | <a href="license://show" style="color: #4ecdc4; text-decoration: none;">Licenses &amp; Notices</a>')
         version_label.setStyleSheet("color: #666666; font-size: 10px; font-style: italic;")
         version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         version_label.linkActivated.connect(self.handle_footer_link)
@@ -743,8 +838,6 @@ class MainWindow(QMainWindow):
 
         self.data_file = dialog.source_path
         self.imported_dataframe = dialog.normalized_dataframe
-        self.import_target_timezone_name = dialog.selected_target_timezone_name
-        self.import_target_offset_minutes = dialog.selected_target_offset_minutes
         self.import_metadata = {
             'worksheet': dialog.selected_sheet_name,
             'header_row': dialog.selected_header_row,
@@ -767,15 +860,9 @@ class MainWindow(QMainWindow):
         for radio in (self.tower_radio, self.ta_radio, self.gps_radio):
             radio.setEnabled(radio is selected_radio)
 
-        timezone_index = self.source_timezone_combo.findData(dialog.selected_source_timezone_name)
-        self.source_timezone_combo.setCurrentIndex(max(timezone_index, 0))
-        offset_index = self.source_utc_offset_combo.findData(dialog.selected_source_offset_minutes)
-        if offset_index >= 0:
-            self.source_utc_offset_combo.setCurrentIndex(offset_index)
-        date_order_index = self.source_date_order_combo.findData(dialog.selected_date_order)
-        self.source_date_order_combo.setCurrentIndex(max(date_order_index, 0))
+        self.apply_import_timestamp_settings(dialog)
 
-        self.generate_button.setEnabled(True)
+        self.set_generation_actions_enabled(True)
         self.file_label.setText(f"✅ Imported: {filename}")
         self.file_label.setStyleSheet("color: #00ff00; font-weight: bold;")
         self.drag_drop_widget.drop_label.setText(f"📁 Imported: {filename}\n\nReady to generate output files")
@@ -800,6 +887,62 @@ class MainWindow(QMainWindow):
                 )
         return True
 
+    def apply_import_timestamp_settings(self, dialog):
+        """Mirror accepted import timestamp settings into the main controls."""
+        timezone_name = dialog.selected_source_timezone_name
+        timezone_index = self.source_timezone_combo.findData(timezone_name)
+        if timezone_index < 0 and timezone_name:
+            self.source_timezone_combo.addItem(timezone_name, timezone_name)
+            timezone_index = self.source_timezone_combo.count() - 1
+        self.source_timezone_combo.setCurrentIndex(max(timezone_index, 0))
+
+        offset_index = self.source_utc_offset_combo.findData(
+            dialog.selected_source_offset_minutes
+        )
+        if offset_index >= 0:
+            self.source_utc_offset_combo.setCurrentIndex(offset_index)
+
+        self.set_target_timestamp_selection(
+            dialog.selected_target_timezone_name,
+            dialog.selected_target_offset_minutes,
+        )
+
+        date_order_index = self.source_date_order_combo.findData(
+            dialog.selected_date_order
+        )
+        self.source_date_order_combo.setCurrentIndex(max(date_order_index, 0))
+
+    def update_source_timestamp_controls(self, *_args):
+        """Show the fixed offset only when it controls source interpretation."""
+        uses_fixed_offset = self.source_timezone_combo.currentData() is None
+        self.source_offset_label.setVisible(uses_fixed_offset)
+        self.source_utc_offset_combo.setVisible(uses_fixed_offset)
+
+    def set_target_timestamp_selection(self, timezone_name, offset_minutes):
+        """Select a display-timezone choice by its semantic value."""
+        for index in range(self.target_timezone_combo.count()):
+            selection = self.target_timezone_combo.itemData(index) or {}
+            if timezone_name is not None:
+                matches = selection.get('timezone_name') == timezone_name
+            elif offset_minutes is None:
+                matches = selection.get('no_change') is True
+            else:
+                matches = (
+                    not selection.get('no_change')
+                    and selection.get('timezone_name') is None
+                    and selection.get('offset_minutes') == offset_minutes
+                )
+            if matches:
+                self.target_timezone_combo.setCurrentIndex(index)
+                return
+
+    def update_target_timestamp_selection(self, *_args):
+        """Keep generation settings synchronized with the visible control."""
+        (
+            self.import_target_timezone_name,
+            self.import_target_offset_minutes,
+        ) = ImportWizardDialog.timezone_selection(self.target_timezone_combo)
+
     def open_import_records_dialog(self):
         """Manual entry point to the existing import wizard workflow."""
         self.show_import_wizard()
@@ -808,47 +951,49 @@ class MainWindow(QMainWindow):
         """Handle file dropped via drag and drop"""
         self.handle_file_selection(file_path)
     
-    def handle_file_selection(self, file_path):
+    def handle_file_selection(self, file_path, inspected_dataframe=None):
         """Handler for file selection (both browse and drag-drop)"""
-        self.data_file = file_path
-        self.imported_dataframe = None
-        self.import_metadata = None
-        self.import_target_timezone_name = None
-        self.import_target_offset_minutes = None
         filename = Path(file_path).name
-        
-        # Clear custom label field for new file
-        self.custom_label_input.clear()
-        
-        # Update UI with file selected
-        self.file_label.setText(f"📄 {filename}")
-        self.file_label.setStyleSheet("color: #888888; font-weight: normal;")
-        
-        # Update drag-drop widget to show selected file
-        self.drag_drop_widget.drop_label.setText(f"📁 Selected: {filename}\n\nValidating format...")
-        
-        self.add_status_message(f"Selected file: {filename}")
+        file_extension = Path(file_path).suffix.lower()
+        if inspected_dataframe is None:
+            self.data_file = file_path
+            self.imported_dataframe = None
+            self.import_metadata = None
+            self.import_target_timezone_name = None
+            self.import_target_offset_minutes = None
+            self.set_target_timestamp_selection(None, None)
+            self.custom_label_input.clear()
+            self.set_generation_actions_enabled(False)
+            self.file_label.setText(f"📄 {filename}")
+            self.file_label.setStyleSheet("color: #888888; font-weight: normal;")
+            self.drag_drop_widget.drop_label.setText(
+                f"📁 Selected: {filename}\n\nValidating format..."
+            )
+            self.add_status_message(f"Selected file: {filename}")
+
+            if file_extension in ('.xlsx', '.csv'):
+                file_type = "Excel" if file_extension == '.xlsx' else "CSV"
+                self.add_status_message(f"📊 Reading {file_type} headers...")
+                self.start_file_inspection(file_path)
+                return
         
         # Validate file format and auto-detect data type
         try:
             # Read file based on extension (with Excel date handling)
-            file_extension = Path(file_path).suffix.lower()
             if file_extension == '.xls':
                 self.add_status_message("📊 Legacy Excel file detected - opening column mapping wizard")
                 if self.show_import_wizard(file_path):
                     return
-                self.generate_button.setEnabled(False)
+                self.set_generation_actions_enabled(False)
                 self.file_label.setText(f"⚠️ {filename} (Mapping Required)")
                 self.file_label.setStyleSheet("color: #ff6666; font-weight: bold;")
                 self.drag_drop_widget.drop_label.setText(f"⚠️ Mapping Required: {filename}\n\nDrop or browse again to reopen the wizard")
                 self.add_status_message("⚠️ Column mapping was cancelled; no data is ready for generation")
                 return
             elif file_extension == '.xlsx':
-                df = pd.read_excel(file_path, nrows=1, engine='openpyxl')
-                self.add_status_message("📊 Reading Excel file...")
+                df = inspected_dataframe
             elif file_extension == '.csv':
-                df = pd.read_csv(file_path, nrows=1)
-                self.add_status_message("📄 Reading CSV file...")
+                df = inspected_dataframe
             else:
                 raise ValueError(f"Unsupported file format: {file_extension}. Please use .csv or .xlsx files.")
             
@@ -890,7 +1035,7 @@ class MainWindow(QMainWindow):
             
             # Enable generation only if valid template detected
             if detected_type:
-                self.generate_button.setEnabled(True)
+                self.set_generation_actions_enabled(True)
                 self.file_label.setText(f"✅ {filename}")
                 self.file_label.setStyleSheet("color: #00ff00; font-weight: bold;")
                 self.drag_drop_widget.drop_label.setText(f"📁 Ready: {filename}\n\nDrag another CSV to replace")
@@ -914,7 +1059,7 @@ class MainWindow(QMainWindow):
                     return
 
                 # Mapping cancelled - disable generation and show error
-                self.generate_button.setEnabled(False)
+                self.set_generation_actions_enabled(False)
                 self.file_label.setText(f"⚠️ {filename} (Mapping Required)")
                 self.file_label.setStyleSheet("color: #ff6666; font-weight: bold;")
                 self.drag_drop_widget.drop_label.setText(f"⚠️ Mapping Required: {filename}\n\nDrop or browse again to reopen the wizard")
@@ -929,23 +1074,70 @@ class MainWindow(QMainWindow):
                 self.ta_radio.setChecked(False)
                 self.gps_radio.setChecked(False)
                 
-        except Exception as e:
-            # File reading error - disable generation
-            self.generate_button.setEnabled(False)
-            self.file_label.setText(f"❌ {filename} (Error)")
-            self.file_label.setStyleSheet("color: #ff6666; font-weight: bold;")
-            self.drag_drop_widget.drop_label.setText(f"❌ Error reading: {filename}\n\nCheck file format and try again")
-            self.add_status_message(f"❌ Error reading CSV file: {str(e)}")
-            self.add_status_message("💡 Ensure file is a valid CSV with proper headers")
-            
-            # Disable all radio buttons for error cases
-            self.tower_radio.setEnabled(False)
-            self.ta_radio.setEnabled(False)
-            self.gps_radio.setEnabled(False)
-            # Clear any previous selections
-            self.tower_radio.setChecked(False)
-            self.ta_radio.setChecked(False)
-            self.gps_radio.setChecked(False)
+        except Exception as error:
+            self.handle_file_inspection_error(file_path, str(error))
+
+    def start_file_inspection(self, file_path):
+        """Inspect source headers without blocking the main window."""
+        self.pending_inspection_path = str(file_path)
+        self.progress_bar.setRange(0, 0)
+        self.progress_bar.setVisible(True)
+        self.drag_drop_widget.setEnabled(False)
+        self.import_records_button.setEnabled(False)
+
+        worker = SourceFileLoadWorker(
+            file_path, inspect_only=True, parent=self
+        )
+        self.file_inspector = worker
+        worker.result_ready.connect(self.on_file_inspection_result)
+        worker.load_error.connect(
+            lambda message, path=str(file_path):
+            self.on_file_inspection_error(path, message)
+        )
+        worker.finished.connect(self.on_file_inspector_finished)
+        worker.start()
+
+    def finish_file_inspection_ui(self):
+        """Restore main-window controls after source inspection."""
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setVisible(False)
+        self.drag_drop_widget.setEnabled(True)
+        self.import_records_button.setEnabled(True)
+
+    def on_file_inspection_result(self, result):
+        """Continue template detection after background header inspection."""
+        file_path = result['file_path']
+        if file_path != self.pending_inspection_path:
+            return
+        self.finish_file_inspection_ui()
+        self.handle_file_selection(file_path, result['dataframe'])
+        self.file_inspection_finished.emit(True)
+
+    def on_file_inspection_error(self, file_path, message):
+        """Report a source inspection failure and reset file controls."""
+        self.finish_file_inspection_ui()
+        filename = Path(file_path).name
+        self.set_generation_actions_enabled(False)
+        self.file_label.setText(f"❌ {filename} (Error)")
+        self.file_label.setStyleSheet("color: #ff6666; font-weight: bold;")
+        self.drag_drop_widget.drop_label.setText(
+            f"❌ Error reading: {filename}\n\nCheck file format and try again"
+        )
+        self.add_status_message(f"❌ Error reading source file: {message}")
+        self.add_status_message(
+            "💡 Ensure the source is a valid CSV or Excel file with readable headers"
+        )
+        for radio in (self.tower_radio, self.ta_radio, self.gps_radio):
+            radio.setEnabled(False)
+            radio.setChecked(False)
+        self.file_inspection_finished.emit(False)
+
+    def on_file_inspector_finished(self):
+        """Release the completed header-inspection worker."""
+        if self.file_inspector:
+            self.file_inspector.deleteLater()
+            self.file_inspector = None
+        self.pending_inspection_path = None
     
     def select_color(self, color_type):
         """Open color dialog to select colors"""
@@ -1014,7 +1206,12 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.add_status_message(f"⚠️ Error opening file location: {str(e)}")
     
-    def generate_kml(self):
+    def set_generation_actions_enabled(self, enabled):
+        """Keep both generation actions in the same enabled state."""
+        self.generate_button.setEnabled(enabled)
+        self.viewer_button.setEnabled(enabled)
+
+    def generate_kml(self, open_viewer=False):
         """Generate output files in background thread"""
         if self.kml_generator and self.kml_generator.isRunning():
             QMessageBox.warning(self, "Generation in Progress", "Wait for the current output generation to finish.")
@@ -1030,6 +1227,8 @@ class MainWindow(QMainWindow):
             data_type = "Distance from Tower"
         else:
             data_type = "Location Point"
+
+        self.open_viewer_after_generation = open_viewer
         
         # Collect settings
         settings = {
@@ -1058,7 +1257,8 @@ class MainWindow(QMainWindow):
         }
         
         # Start generation
-        self.generate_button.setEnabled(False)
+        self.set_generation_actions_enabled(False)
+        self.open_viewer_button.setEnabled(False)
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
         
@@ -1095,7 +1295,8 @@ class MainWindow(QMainWindow):
     def on_generation_finished(self, output_payload):
         """Handle successful KML/GeoJSON generation"""
         self.progress_bar.setVisible(False)
-        self.generate_button.setEnabled(True)
+        open_viewer = self.open_viewer_after_generation
+        self.open_viewer_after_generation = False
 
         if isinstance(output_payload, dict):
             kml_content = output_payload.get('kml', '')
@@ -1139,6 +1340,8 @@ class MainWindow(QMainWindow):
                     f"✅ GeoJSON file saved successfully: {geojson_path.name}"
                 )
             except Exception as e:
+                self.set_generation_actions_enabled(True)
+                self.open_viewer_button.setEnabled(True)
                 self.add_status_message(f"❌ Error saving file: {str(e)}")
                 QMessageBox.critical(
                     self,
@@ -1159,10 +1362,100 @@ class MainWindow(QMainWindow):
                     f"The output files were saved, but their generation log could not be saved:\n\n{str(e)}"
                 )
 
-            # Open file location and highlight file
-            self.open_file_location(output_file)
+            if open_viewer:
+                self.start_geolibre_viewer(geojson_path)
+            else:
+                self.set_generation_actions_enabled(True)
+                self.open_viewer_button.setEnabled(True)
+                self.open_file_location(output_file)
         else:
+            self.set_generation_actions_enabled(True)
+            self.open_viewer_button.setEnabled(True)
             self.add_status_message("⚠️ File save cancelled by user")
+
+    def open_geolibre_viewer(self):
+        """Open a clean viewer session for existing KML or GeoJSON files."""
+        self.start_geolibre_viewer()
+
+    def start_geolibre_viewer(self, geojson_path=None):
+        """Prepare and launch the bundled GeoLibre viewer in the background."""
+        if self.viewer_launcher is not None:
+            QMessageBox.information(
+                self,
+                "Viewer Is Opening",
+                "Wait for the included viewer to finish opening.",
+            )
+            return
+
+        self.pending_viewer_geojson_path = (
+            Path(geojson_path) if geojson_path is not None else None
+        )
+        self.restore_generation_actions_after_viewer = (
+            geojson_path is not None or self.generate_button.isEnabled()
+        )
+        self.set_generation_actions_enabled(False)
+        self.open_viewer_button.setEnabled(False)
+        self.progress_bar.setRange(0, 0)
+        self.progress_bar.setVisible(True)
+        self.add_status_message("Preparing the included GeoLibre viewer...")
+
+        display_name = None
+        if geojson_path is not None:
+            display_name = self.current_generation_settings.get('custom_label') or Path(geojson_path).stem
+        self.viewer_launcher = GeoLibreLaunchWorker(geojson_path, display_name, self)
+        self.viewer_launcher.launched.connect(self.on_geolibre_viewer_launched)
+        self.viewer_launcher.error.connect(self.on_geolibre_viewer_error)
+        self.viewer_launcher.finished.connect(self.on_geolibre_viewer_thread_finished)
+        self.viewer_launcher.start()
+
+    def on_geolibre_viewer_launched(self, project_path):
+        """Restore the UI after GeoLibre accepts the generated project."""
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setVisible(False)
+        self.set_generation_actions_enabled(self.restore_generation_actions_after_viewer)
+        self.open_viewer_button.setEnabled(True)
+        opened_generated_output = self.pending_viewer_geojson_path is not None
+        self.pending_viewer_geojson_path = None
+        if opened_generated_output:
+            self.add_status_message(
+                f"✅ Opened generated data in GeoLibre: {Path(project_path).name}"
+            )
+        else:
+            self.add_status_message(
+                "✅ Opened GeoLibre; drag one or more KML or GeoJSON files into the viewer"
+            )
+
+    def on_geolibre_viewer_error(self, error_message):
+        """Report viewer setup errors without losing the generated outputs."""
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setVisible(False)
+        self.set_generation_actions_enabled(self.restore_generation_actions_after_viewer)
+        self.open_viewer_button.setEnabled(True)
+        generated_output_path = self.pending_viewer_geojson_path
+        if generated_output_path:
+            status_message = f"⚠️ Output files were saved, but GeoLibre could not open: {error_message}"
+            dialog_message = (
+                "The output files were saved, but the included GeoLibre viewer could not be opened:\n\n"
+                f"{error_message}"
+            )
+        else:
+            status_message = f"⚠️ The included GeoLibre viewer could not open: {error_message}"
+            dialog_message = f"The included GeoLibre viewer could not be opened:\n\n{error_message}"
+        self.add_status_message(status_message)
+        QMessageBox.warning(
+            self,
+            "Viewer Launch Warning",
+            dialog_message,
+        )
+        if generated_output_path:
+            self.open_file_location(generated_output_path)
+        self.pending_viewer_geojson_path = None
+
+    def on_geolibre_viewer_thread_finished(self):
+        """Release the completed viewer launch worker."""
+        if self.viewer_launcher:
+            self.viewer_launcher.deleteLater()
+            self.viewer_launcher = None
 
     @staticmethod
     def write_visualization_outputs(output_file, kml_content, geojson_content):
@@ -1291,7 +1584,9 @@ class MainWindow(QMainWindow):
     def on_generation_error(self, error_message):
         """Handle KML generation error"""
         self.progress_bar.setVisible(False)
-        self.generate_button.setEnabled(True)
+        self.set_generation_actions_enabled(True)
+        self.open_viewer_button.setEnabled(True)
+        self.open_viewer_after_generation = False
         
         self.add_status_message(f"❌ Error: {error_message}")
         

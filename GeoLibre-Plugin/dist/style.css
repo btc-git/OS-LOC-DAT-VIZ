@@ -3,6 +3,14 @@
  * Licensed under the GNU General Public License v3.0 - see LICENSE for details
  */
 
+header.osloc-simplified-viewer-toolbar button {
+  display: none !important
+}
+
+header.osloc-simplified-viewer-toolbar button[aria-label="OS-LOC-DAT-VIZ"] {
+  display: inline-flex !important
+}
+
 .osloc-v028 {
   box-sizing: border-box;
   padding: 11px;
@@ -210,6 +218,34 @@
 .osloc-v028__diag div {
   margin-top: 5px;
   line-height: 1.4
+}
+
+.osloc-v028__about {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(127, 127, 127, .25);
+  font-size: 11px
+}
+
+.osloc-v028__about-body {
+  display: grid;
+  gap: 6px;
+  margin-top: 7px;
+  line-height: 1.45;
+  opacity: .78
+}
+
+.osloc-v028__about-body p {
+  margin: 0
+}
+
+.osloc-v028__about-links {
+  display: grid;
+  gap: 3px
+}
+
+.osloc-v028__about-links a {
+  color: #60a5fa
 }
 
 /* Full-width bottom timeline across the map area */
@@ -576,7 +612,7 @@
   white-space: nowrap;
 }
 
-/* v0.0.33 inclusive event-date filtering */
+/* v0.0.39 inclusive event date/time filtering */
 .osloc-v028__date-filter {
   display: grid;
   gap: 7px;
@@ -604,7 +640,7 @@
 
 .osloc-v028__date-filter-fields {
   display: grid;
-  grid-template-columns: minmax(118px, 1fr) minmax(118px, 1fr) auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 7px;
   align-items: end;
 }
@@ -617,7 +653,8 @@
   opacity: .84;
 }
 
-.osloc-v028__date-filter-fields input[type="date"] {
+.osloc-v028__date-filter-fields input[type="datetime-local"] {
+  box-sizing: border-box;
   width: 100%;
   min-width: 0;
   padding: 6px;
@@ -629,13 +666,15 @@
   font: inherit;
 }
 
-.osloc-v028__date-filter-fields input[type="date"]:focus {
+.osloc-v028__date-filter-fields input[type="datetime-local"]:focus {
   outline: 2px solid #3b82f6;
   outline-offset: 1px;
 }
 
 .osloc-v028__date-filter-actions {
+  grid-column: 1 / -1;
   display: flex;
+  justify-content: flex-end;
   gap: 5px;
 }
 
@@ -652,7 +691,7 @@
 
 @media (max-width: 430px) {
   .osloc-v028__date-filter-fields {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .osloc-v028__date-filter-actions {

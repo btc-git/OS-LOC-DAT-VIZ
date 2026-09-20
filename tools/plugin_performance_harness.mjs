@@ -33,7 +33,12 @@ function loadFeatures() {
     if (!fs.existsSync(featureDataPath)) {
         fail(`Missing feature file: ${featureDataPath}`);
     }
-    return JSON.parse(fs.readFileSync(featureDataPath, "utf8"));
+    const payload = JSON.parse(fs.readFileSync(featureDataPath, "utf8"));
+    if (Array.isArray(payload)) return payload;
+    if (payload?.type === "FeatureCollection" && Array.isArray(payload.features)) {
+        return payload.features;
+    }
+    fail("Feature file must be a GeoJSON FeatureCollection or an array of features");
 }
 
 function eventKeyFromProps(p) {
@@ -515,6 +520,7 @@ function buildRuntime(diag, scenario) {
     diag.state.labelsEnabled = true;
     diag.state.dateFilterStart = "";
     diag.state.dateFilterEnd = "";
+    diag.state.dateFilterAuto = true;
     diag.state.nativeIdsByEventKey = new Map();
     diag.state.nativeOwnerByLayerId = new Map();
     diag.state.nativeMappingKindByLayerId = new Map();
@@ -557,7 +563,7 @@ async function loadDiagModule() {
         fail(`Missing plugin file: ${pluginPath}`);
     }
     const src = fs.readFileSync(pluginPath, "utf8") +
-        "\nexport const __diag = { state, scanAll, applyVisibility, applyDateFilter, eventDisplayDate, eventMatchesDateFilter, makeDateFilterControl, rebuildNativeIndex, reconcileGeojsonRendering, focusEvents, detailDescriptionForFeature, parseDescription, formatMainEventLabel, formatMapTimeLabel, scheduleFullScan, updateMapLabels, updateDynamicUI, renderEventList, renderPanel, renderPanelSafe, shouldShow, timelineRange, eventFromMapFeature, collectOslocLayerDiagnostics };\n";
+        "\nexport const __diag = { state, scanAll, applyVisibility, applyDateFilter, eventDisplayMinute, eventDateTimeBounds, eventMatchesDateFilter, makeDateFilterControl, makeAboutSection, rebuildNativeIndex, reconcileGeojsonRendering, focusEvents, detailDescriptionForFeature, parseDescription, formatMainEventLabel, formatMapTimeLabel, scheduleFullScan, updateMapLabels, updateDynamicUI, renderEventList, renderPanel, renderPanelSafe, shouldShow, timelineRange, eventFromMapFeature, collectOslocLayerDiagnostics };\n";
     fs.writeFileSync(tmpModule, src, "utf8");
     try {
         const moduleUrl = `${pathToFileURL(tmpModule).href}?v=${Date.now()}`;
@@ -1325,9 +1331,23 @@ function runDateRangeFilterCheck(diag) {
     diag.state.enabledEventKeys = new Set(diag.state.events.map(event => event.key));
     diag.state.enabledEventsVersion++;
 
+    assert(diag.state.dateFilterAuto === true, "Discovered data should begin with automatic filter bounds");
     assert(
-        diag.eventDisplayDate(diag.state.events[0]) === "2023-01-31",
-        "Date filtering must use the corrected local date rather than canonical UTC"
+        diag.state.dateFilterStart === "2023-01-31T20:14",
+        "The automatic From value should use the earliest corrected local record time"
+    );
+    assert(
+        diag.state.dateFilterEnd === "2023-02-02T09:00",
+        "The automatic Through value should use the latest corrected local record time"
+    );
+    assert(
+        diag.state.events.filter(diag.shouldShow).length === 3,
+        "Suggested bounds must not filter records before Apply is selected"
+    );
+
+    assert(
+        diag.eventDisplayMinute(diag.state.events[0]) === "2023-01-31T20:14",
+        "Date/time filtering must use the corrected local time rather than canonical UTC"
     );
     assert(
         diag.applyDateFilter("2023-02-01", "2023-02-01") === true,
@@ -1357,10 +1377,10 @@ function runDateRangeFilterCheck(diag) {
         diag.applyDateFilter("2023-02-03", "2023-02-01") === false,
         "An inverted date range should be rejected"
     );
-    assert(diag.state.dateFilterStart === "2023-02-01", "Rejected input must preserve the active From date");
-    assert(diag.state.dateFilterEnd === "2023-02-01", "Rejected input must preserve the active Through date");
+    assert(diag.state.dateFilterStart === "2023-02-01T00:00", "Rejected input must preserve the active From time");
+    assert(diag.state.dateFilterEnd === "2023-02-01T23:59", "Rejected input must preserve the active Through time");
 
-    assert(diag.applyDateFilter("", "") === true, "All Dates should clear the range");
+    assert(diag.applyDateFilter("", "") === true, "All Times should clear the range");
     assert(diag.state.events.filter(diag.shouldShow).length === 3, "Clearing the range should restore all enabled events");
 
     const control = diag.makeDateFilterControl();
@@ -1370,17 +1390,17 @@ function runDateRangeFilterCheck(diag) {
         for (const child of element.children || []) visit(child);
     };
     visit(control);
-    const dateInputs = descendants.filter(element => element.type === "date");
+    const dateInputs = descendants.filter(element => element.type === "datetime-local");
     const buttonLabels = descendants
         .filter(element => element.type === "button")
         .map(element => element.textContent);
-    assert(dateInputs.length === 2, "Date-range control should render From and Through date pickers");
+    assert(dateInputs.length === 2, "Date-range control should render From and Through date/time pickers");
     assert(
         dateInputs.every(input => !input.min && !input.max),
         "Date pickers must not clamp or clear partially typed dates"
     );
-    dateInputs[0].value = "2023-01-31";
-    dateInputs[1].value = "2023-02-01";
+    dateInputs[0].value = "2023-01-31T20:14";
+    dateInputs[1].value = "2023-02-01T09:00";
     dateInputs[0].dispatchEvent({ type: "change" });
     dateInputs[1].dispatchEvent({ type: "change" });
     assert(
@@ -1388,7 +1408,20 @@ function runDateRangeFilterCheck(diag) {
         "Date picker changes must not constrain the other field"
     );
     assert(buttonLabels.includes("Apply"), "Date-range control should include Apply");
-    assert(buttonLabels.includes("All Dates"), "Date-range control should include All Dates");
+    assert(buttonLabels.includes("All Times"), "Date-range control should include All Times");
+
+    const about = diag.makeAboutSection();
+    const aboutDescendants = [];
+    const visitAbout = element => {
+        aboutDescendants.push(element);
+        for (const child of element.children || []) visitAbout(child);
+    };
+    visitAbout(about);
+    const aboutText = aboutDescendants.map(element => element.textContent || "").join("\n");
+    assert(aboutText.includes("About & licenses"), "Viewer panel should expose license information");
+    assert(aboutText.includes("GNU General Public License v3.0"), "Viewer panel should identify the plugin license");
+    assert(aboutText.includes("GeoLibre 3.0.0"), "Viewer panel should identify the bundled GeoLibre version");
+    assert(aboutText.includes("MIT License"), "Viewer panel should identify the GeoLibre license");
 
     const pluginSource = fs.readFileSync(pluginPath, "utf8");
     assert(!pluginSource.includes("◀ 1 min"), "Timeline should not include the back-one-minute button");

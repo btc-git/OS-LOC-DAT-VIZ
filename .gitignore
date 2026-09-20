@@ -17,6 +17,7 @@ htmlcov/
 *.manifest
 *.exe
 *.zip
+!GeoLibre-Viewer/geolibre-desktop-3.0.0-x64-portable.zip
 node_modules/
 
 # Local Data & Generated Diagnostics

@@ -36,6 +36,7 @@ A standalone desktop application for **quick triage and initial visualization** 
 - KML output for Google Earth Pro and compatible GIS software
 - GeoJSON output optimized for GeoLibre/MapLibre workflows
 - Included [GeoLibre viewer plugin](GeoLibre-Plugin/README.md) for filtering, timeline playback, labels, and event details
+- Direct **Save Outputs**, **Save & Open Viewer**, and **Open Viewer** actions using the included GeoLibre Desktop 3.0.0 portable viewer
 - Same-named TXT generation log with source/output hashes, settings, row outcomes, and warnings
 
 ### 🖥️ **User-Friendly Interface**
@@ -59,10 +60,12 @@ A standalone desktop application for **quick triage and initial visualization** 
 2. A file using the application’s standard template headers is recognized automatically.
 3. For other files, the column-mapping wizard opens automatically. Select the worksheet and header row, choose the record type, review the suggested mappings, and optionally limit the import to an inclusive date/time range.
 4. Review the timezone, slash/dash date order, units, and visualization settings.
-5. Click Generate to create same-named KML, GeoJSON, and TXT generation-log files.
-6. Review warnings and row outcomes in the TXT log, then open the KML in **Google Earth Pro** or use the GeoJSON in **GeoLibre** or another compatible GIS application.
+5. Click **Save Outputs** to create the KML, GeoJSON, and TXT generation log, or **Save & Open Viewer** to create them and immediately open the GeoJSON in the included viewer. Use **Open Viewer** to review existing KML or GeoJSON files without generating new outputs.
+6. Review warnings and row outcomes in the TXT log. All visualizations remain preliminary and require independent expert review.
 
 Each generation writes a `.kml`, `.geojson`, and `.txt` file with the same base name. The log records source and output SHA-256 hashes, import mappings, timestamp interpretation, visualization settings, row outcomes, and warnings without copying source-record contents.
+
+**Save & Open Viewer** also writes a same-named `.geolibre` companion project. **Open Viewer** starts a clean, plugin-enabled session where one or several existing KML or GeoJSON files can be dragged in together. On first use, the application verifies and extracts its pinned GeoLibre portable bundle and installs the included OS-LOC viewer plugin in GeoLibre's per-user plugin directory. Viewer projects activate the plugin, open its panel, and hide unrelated toolbar controls. A generated companion project also shows and frames its generated events automatically. Because GeoLibre enforces one running instance per Windows session, close any other GeoLibre window before starting the included viewer.
 
 For original carrier records that do not match a template, the import wizard opens automatically. It supports CSV, XLS, and XLSX files; worksheet and header-row selection; record-type selection; explicit column mapping; and optional inclusive date/time range filtering. Date selections include the complete start and end days by default; select **Use exact times** for narrower boundaries. **Check Matching Rows** reports both timestamp matches and rows with valid mapped coordinates before import. The filter uses the selected timezone interpretation, excludes timestamps that cannot be parsed or uniquely resolved, and records all filter counts and boundaries in the TXT generation log. Its live preview shows the first 25 source rows with each original column header and the application field currently mapped to it. Azimuth may be left unmapped when it is unavailable; the application will use a 360-degree visualization. Imported records are normalized in memory and the original file is not modified.
 
@@ -141,6 +144,7 @@ Download the standalone executable `OS-LocationDataVisualizer.exe` - no Python i
 
 ```bash
 python -m unittest discover -s tests -v
+node tests/test_plugin_simplified_chrome.mjs
 ```
 
 **Building the Executable:**
@@ -161,7 +165,7 @@ python -m unittest discover -s tests -v
 
 ## Privacy & Security
 
-Location-data processing and export run locally; the application does not upload source or output files. Generated KML, GeoJSON, and TXT logs can contain sensitive location information and should be handled accordingly. Opening project links or exported files in other applications is subject to those applications' behavior.
+Location-data processing and export run locally; the application does not upload source or output files. Generated KML, GeoJSON, TXT, and GeoLibre project files can contain sensitive location information and should be handled accordingly. The included viewer loads its default basemap from OpenFreeMap, which requires a network connection and discloses ordinary tile-request metadata such as IP address and viewed map area to that service. Opening project links or exported files in other applications is subject to those applications' behavior.
 
 ## Important Disclaimers
 

@@ -145,6 +145,25 @@ class KMLTemporalMetadataTests(unittest.TestCase):
             dmy_generator.parse_timestamp_to_kml('2026-09-15 14:30:00')[0],
         )
 
+    def test_year_first_dates_use_selected_month_day_order(self):
+        ymd_settings = generator_settings()
+        ymd_settings['source_date_order'] = 'YMD'
+        ydm_settings = generator_settings()
+        ydm_settings['source_date_order'] = 'YDM'
+
+        self.assertEqual(
+            '2026-04-10T14:30:00Z',
+            KMLGenerator('', 'Tower/Sector', ymd_settings).parse_timestamp_to_kml(
+                '2026-04-10 14:30:00'
+            )[0],
+        )
+        self.assertEqual(
+            '2026-10-04T14:30:00Z',
+            KMLGenerator('', 'Tower/Sector', ydm_settings).parse_timestamp_to_kml(
+                '2026-04-10 14:30:00'
+            )[0],
+        )
+
     def test_event_title_uses_display_timezone_and_us_date_format(self):
         settings = generator_settings()
         settings['target_timezone_name'] = 'America/New_York'

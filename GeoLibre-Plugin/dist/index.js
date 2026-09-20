@@ -4,6 +4,7 @@
  */
 
 const PLUGIN_ID = "osloc-dat-viz-viewer";
+const PLUGIN_VERSION = "0.0.39";
 const PANEL_ID = "osloc-dat-viz-panel";
 const DETAILS_ID = "osloc-dat-viz-details";
 const LABEL_SOURCE_ID = "osloc-dat-viz-time-labels-source";
@@ -41,6 +42,8 @@ let playbackRaf = null;
 let scrubVisibilityTimer = null;
 let renderReconcileTimer = null;
 let detachMapEvents = [];
+let simplifiedChromeObserver = null;
+let simplifiedToolbar = null;
 
 let timelineEl = null;
 let lastLayerSignature = "";
@@ -69,8 +72,9 @@ const state = {
   speed: 60, // evidence seconds per real second
   durationOverrideMs: null, // null = use each KML's generated TimeSpan
   labelsEnabled: true,
-  dateFilterStart: "", // YYYY-MM-DD, inclusive; empty = open bound
-  dateFilterEnd: "",   // YYYY-MM-DD, inclusive; empty = open bound
+  dateFilterStart: "", // YYYY-MM-DDTHH:mm local time, inclusive; empty = open bound
+  dateFilterEnd: "",   // YYYY-MM-DDTHH:mm local time, inclusive; empty = open bound
+  dateFilterAuto: true,
   lastFrameRealMs: null,
 
   nativeIdsByEventKey: new Map(),
@@ -125,6 +129,11 @@ const state = {
   timelineBoundaries: [],
   commonTimezoneValue: "",
   timelineIncludesDate: false,
+  autoShowAll: false,
+  autoFocus: false,
+  simplifiedViewer: false,
+  startupDatasetId: "",
+  startupBehaviorApplied: false,
 };
 
 function nextAnimationFrame(callback) {
@@ -132,6 +141,44 @@ function nextAnimationFrame(callback) {
     return requestAnimationFrame(callback);
   }
   return setTimeout(callback, 0);
+}
+
+function updateSimplifiedChrome() {
+  if (!state.simplifiedViewer || typeof document === "undefined") {
+    simplifiedToolbar?.classList.remove("osloc-simplified-viewer-toolbar");
+    simplifiedToolbar = null;
+    return;
+  }
+
+  const menuButton = [...document.querySelectorAll("header button")].find(
+    button => button.getAttribute("aria-label") === "OS-LOC-DAT-VIZ"
+  );
+  const nextToolbar = menuButton?.closest("header") ?? null;
+  if (nextToolbar === simplifiedToolbar) return;
+
+  simplifiedToolbar?.classList.remove("osloc-simplified-viewer-toolbar");
+  simplifiedToolbar = nextToolbar;
+  nextToolbar?.classList.add("osloc-simplified-viewer-toolbar");
+}
+
+function setSimplifiedChrome(enabled) {
+  state.simplifiedViewer = enabled;
+  updateSimplifiedChrome();
+
+  if (!enabled) {
+    simplifiedChromeObserver?.disconnect();
+    simplifiedChromeObserver = null;
+    return;
+  }
+
+  if (
+    !simplifiedChromeObserver &&
+    typeof MutationObserver !== "undefined" &&
+    document.body
+  ) {
+    simplifiedChromeObserver = new MutationObserver(updateSimplifiedChrome);
+    simplifiedChromeObserver.observe(document.body, { childList: true, subtree: true });
+  }
 }
 
 function firstProp(p, ...names) {
@@ -931,30 +978,48 @@ function isTemporalEvent(event) {
 }
 
 function dateFilterActive() {
-  return Boolean(state.dateFilterStart || state.dateFilterEnd);
+  return !state.dateFilterAuto && Boolean(
+    state.dateFilterStart || state.dateFilterEnd
+  );
 }
 
-function validDateKey(value) {
-  if (!value) return true;
-  const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!match) return false;
+export function normalizeDateTimeFilterValue(value, through = false) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+
+  const match = text.match(
+    /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?$/
+  );
+  if (!match) return null;
 
   const year = Number(match[1]);
   const month = Number(match[2]);
   const day = Number(match[3]);
   const parsed = new Date(Date.UTC(year, month - 1, day));
-  return parsed.getUTCFullYear() === year &&
+  const validDate = parsed.getUTCFullYear() === year &&
     parsed.getUTCMonth() === month - 1 &&
     parsed.getUTCDate() === day;
+  if (!validDate) return null;
+
+  if (match[4] === undefined) {
+    return `${match[1]}-${match[2]}-${match[3]}T${through ? "23:59" : "00:00"}`;
+  }
+
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  if (hour > 23 || minute > 59) return null;
+  return `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}`;
 }
 
-function eventDisplayDate(event) {
+export function eventDisplayMinute(event) {
   if (!isTemporalEvent(event)) return "";
 
   const literalLocal = String(event.localStart || "").match(
-    /^\s*(\d{4}-\d{2}-\d{2})(?:[ T]|$)/
+    /^\s*(\d{4}-\d{2}-\d{2})[ T](\d{1,2}):(\d{2})/
   );
-  if (literalLocal) return literalLocal[1];
+  if (literalLocal) {
+    return `${literalLocal[1]}T${literalLocal[2].padStart(2, "0")}:${literalLocal[3]}`;
+  }
 
   if (isUsableIanaZone(event.timezone)) {
     const parts = Object.fromEntries(
@@ -963,11 +1028,14 @@ function eventDisplayDate(event) {
         year: "numeric",
         month: "2-digit",
         day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hourCycle: "h23",
       }).formatToParts(new Date(event.startMs))
         .filter(part => part.type !== "literal")
         .map(part => [part.type, part.value])
     );
-    return `${parts.year}-${parts.month}-${parts.day}`;
+    return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
   }
 
   const fixedOffset = String(event.timezone || "").match(
@@ -978,19 +1046,43 @@ function eventDisplayDate(event) {
     const minutes = direction * (
       Number(fixedOffset[2]) * 60 + Number(fixedOffset[3])
     );
-    return new Date(event.startMs + minutes * 60000).toISOString().slice(0, 10);
+    return new Date(event.startMs + minutes * 60000).toISOString().slice(0, 16);
   }
 
-  return new Date(event.startMs).toISOString().slice(0, 10);
+  return new Date(event.startMs).toISOString().slice(0, 16);
+}
+
+export function eventDateTimeBounds(events = state.events) {
+  const minutes = (events ?? [])
+    .map(eventDisplayMinute)
+    .filter(Boolean)
+    .sort();
+  return {
+    start: minutes[0] ?? "",
+    end: minutes[minutes.length - 1] ?? "",
+  };
+}
+
+function updateAutomaticDateFilterBounds() {
+  if (!state.dateFilterAuto) return;
+  const bounds = eventDateTimeBounds();
+  state.dateFilterStart = bounds.start;
+  state.dateFilterEnd = bounds.end;
+}
+
+export function eventMatchesDateTimeBounds(event, start, end) {
+  const eventMinute = eventDisplayMinute(event);
+  if (!eventMinute) return false;
+  if (start && eventMinute < start) return false;
+  if (end && eventMinute > end) return false;
+  return true;
 }
 
 function eventMatchesDateFilter(event) {
   if (!dateFilterActive()) return true;
-  const eventDate = eventDisplayDate(event);
-  if (!eventDate) return false;
-  if (state.dateFilterStart && eventDate < state.dateFilterStart) return false;
-  if (state.dateFilterEnd && eventDate > state.dateFilterEnd) return false;
-  return true;
+  return eventMatchesDateTimeBounds(
+    event, state.dateFilterStart, state.dateFilterEnd
+  );
 }
 
 function eventsMatchingDateFilter(events = state.events) {
@@ -998,16 +1090,17 @@ function eventsMatchingDateFilter(events = state.events) {
 }
 
 function applyDateFilter(startValue, endValue) {
-  const start = String(startValue || "").trim();
-  const end = String(endValue || "").trim();
+  const start = normalizeDateTimeFilterValue(startValue, false);
+  const end = normalizeDateTimeFilterValue(endValue, true);
 
-  if (!validDateKey(start) || !validDateKey(end) || (start && end && start > end)) {
+  if (start === null || end === null || (start && end && start > end)) {
     return false;
   }
 
   stopPlayback();
   state.dateFilterStart = start;
   state.dateFilterEnd = end;
+  state.dateFilterAuto = false;
 
   rebuildTimelineBoundaries();
   const range = timelineRange();
@@ -1915,6 +2008,7 @@ function scanAll(reason = "scan") {
   state.events = events;
   state.datasets = [...datasetsById.values()].sort((a, b) => a.name.localeCompare(b.name));
   state.eventByKey = new Map(events.map(event => [event.key, event]));
+  updateAutomaticDateFilterBounds();
 
   // Preserve explicit user-enabled state for events we already know, but keep
   // newly discovered OS-LOC events hidden by default. This avoids immediately
@@ -1952,7 +2046,25 @@ function scanAll(reason = "scan") {
   state.lastVisibleEventSignature = "";
   state.lastReorderLayerSignature = "";
   state.lastLabelSignature = "";
+
+  const startupDatasetReady = !state.startupDatasetId || events.some(
+    event => event.datasetId === state.startupDatasetId
+  );
+  const applyStartupBehavior =
+    !state.startupBehaviorApplied && events.length > 0 && startupDatasetReady;
+  if (applyStartupBehavior) {
+    state.startupBehaviorApplied = true;
+    if (state.autoShowAll) {
+      state.enabledEventKeys = new Set(events.map(event => event.key));
+      markEnabledEventsChanged();
+    }
+  }
+
   applyVisibility(true);
+
+  if (applyStartupBehavior && state.autoFocus) {
+    nextAnimationFrame(() => focusEvents(state.events));
+  }
 
   // Keep the same timeline DOM alive unless the loaded OS-LOC data actually
   // changed. This prevents an active native range drag from losing its element.
@@ -2927,40 +3039,41 @@ function makeDateFilterControl() {
   heading.className = "osloc-v028__date-filter-head";
 
   const title = document.createElement("strong");
-  title.textContent = "Date range";
+  title.textContent = "Date/time range";
 
   const status = document.createElement("span");
   status.dataset.role = "date-filter-status";
   status.textContent = dateFilterActive()
     ? `${eventsMatchingDateFilter().length} of ${state.events.length} events`
-    : "All dates";
+    : "All times";
   heading.append(title, status);
 
   const fields = document.createElement("div");
   fields.className = "osloc-v028__date-filter-fields";
 
-  const makeDateInput = (labelText, value, role) => {
+  const makeDateTimeInput = (labelText, value, role) => {
     const label = document.createElement("label");
     const text = document.createElement("span");
     text.textContent = labelText;
 
     const input = document.createElement("input");
-    input.type = "date";
+    input.type = "datetime-local";
+    input.step = "60";
     input.value = value;
     input.dataset.role = role;
-    input.setAttribute("aria-label", `${labelText} event date`);
+    input.setAttribute("aria-label", `${labelText} event date and time`);
     input.addEventListener("input", () => input.setCustomValidity?.(""));
 
     label.append(text, input);
     return { label, input };
   };
 
-  const from = makeDateInput(
+  const from = makeDateTimeInput(
     "From",
     state.dateFilterStart,
     "date-filter-start"
   );
-  const through = makeDateInput(
+  const through = makeDateTimeInput(
     "Through",
     state.dateFilterEnd,
     "date-filter-end"
@@ -2973,14 +3086,14 @@ function makeDateFilterControl() {
     through.input.setCustomValidity?.("");
     if (!applyDateFilter(from.input.value, through.input.value)) {
       through.input.setCustomValidity?.(
-        "Through must be the same as or later than From."
+        "Through date and time must be the same as or later than From."
       );
       through.input.reportValidity?.();
     }
   });
   apply.dataset.role = "apply-date-filter";
 
-  const allDates = makeButton("All Dates", () => {
+  const allDates = makeButton("All Times", () => {
     applyDateFilter("", "");
   });
   allDates.dataset.role = "clear-date-filter";
@@ -2989,8 +3102,54 @@ function makeDateFilterControl() {
   actions.append(apply, allDates);
   fields.append(from.label, through.label, actions);
   control.append(heading, fields);
-  control.title = "Filter by the corrected local date shown for each event.";
+  control.title = "Filter by the corrected local date and time shown for each event.";
   return control;
+}
+
+function makeAboutSection() {
+  const about = document.createElement("details");
+  about.className = "osloc-v028__about";
+  about.dataset.role = "about-licenses";
+
+  const summary = document.createElement("summary");
+  summary.textContent = "About & licenses";
+
+  const body = document.createElement("div");
+  body.className = "osloc-v028__about-body";
+
+  const pluginNotice = document.createElement("p");
+  pluginNotice.textContent =
+    `OS-LOC-DAT-VIZ Viewer ${PLUGIN_VERSION} - GNU General Public License v3.0.`;
+
+  const geolibreNotice = document.createElement("p");
+  geolibreNotice.textContent =
+    "GeoLibre 3.0.0 - Copyright (c) 2026 Qiusheng Wu - MIT License.";
+
+  const links = document.createElement("div");
+  links.className = "osloc-v028__about-links";
+  const addLink = (label, url) => {
+    const link = document.createElement("a");
+    link.href = url;
+    link.target = "_blank";
+    link.rel = "noreferrer";
+    link.textContent = label;
+    link.addEventListener("click", event => {
+      if (!state.app?.openExternalUrl) return;
+      event.preventDefault();
+      state.app.openExternalUrl(url);
+    });
+    links.appendChild(link);
+  };
+  addLink("OS-LOC-DAT-VIZ source and license", "https://github.com/btc-git/OS-LOC-DAT-VIZ");
+  addLink("GeoLibre source and MIT license", "https://github.com/opengeos/GeoLibre");
+
+  const bundledNotice = document.createElement("p");
+  bundledNotice.textContent =
+    "Full license notices are bundled with the application and installed viewer.";
+
+  body.append(pluginNotice, geolibreNotice, links, bundledNotice);
+  about.append(summary, body);
+  return about;
 }
 
 function updateDynamicUI() {
@@ -3675,7 +3834,7 @@ function renderPanel() {
 
   toolbar.append(
     makeButton("Show All", () => {
-      // Enable every event; an active date range remains an independent filter.
+      // Enable every event; an active date/time range remains an independent filter.
       stopPlayback();
       state.mode = "overview";
       for (const e of state.events) state.enabledEventKeys.add(e.key);
@@ -3714,7 +3873,7 @@ function renderPanel() {
 
   const focusButton = toolbar.lastElementChild;
   if (focusButton) {
-    focusButton.title = "Show and frame all record sets within the active date range";
+    focusButton.title = "Show and frame all record sets within the active date/time range";
     focusButton.disabled = eventsMatchingDateFilter().length === 0;
   }
 
@@ -3750,6 +3909,7 @@ function renderPanel() {
       "Drag or load one or more KML or GeoJSON files into GeoLibre. The viewer will detect them automatically.";
 
     root.appendChild(empty);
+    root.appendChild(makeAboutSection());
     c.appendChild(root);
     return;
   }
@@ -3761,7 +3921,7 @@ function renderPanel() {
   hintLine1.textContent = "Click an event here or on the map to view its details.";
 
   const hintLine2 = document.createElement("div");
-  hintLine2.textContent = "Date range also limits the timeline. Focus All frames every matching record set; Focus Set isolates one record set.";
+  hintLine2.textContent = "Date/time range also limits the timeline. Focus All frames every matching record set; Focus Set isolates one record set.";
 
   hint.append(hintLine1, hintLine2);
   root.appendChild(hint);
@@ -3843,7 +4003,7 @@ function renderPanel() {
       if (!matchingEvents.length) {
         const emptyRange = document.createElement("div");
         emptyRange.className = "osloc-v028__date-filter-empty";
-        emptyRange.textContent = "No events in this date range";
+        emptyRange.textContent = "No events in this date/time range";
         section.appendChild(emptyRange);
       }
     }
@@ -3871,6 +4031,7 @@ function renderPanel() {
 
   diagnostics.append(summaryEl, detail);
   root.appendChild(diagnostics);
+  root.appendChild(makeAboutSection());
 
   c.appendChild(root);
   updateDynamicUI();
@@ -3970,7 +4131,26 @@ function startLayerMonitor() {
 export const plugin = {
   id: PLUGIN_ID,
   name: "OS-LOC-DAT-VIZ Viewer",
-  version: "0.0.34",
+  version: PLUGIN_VERSION,
+  restoresPanelCollapseState: true,
+
+  applyProjectState(_app, projectState) {
+    const settings = projectState && typeof projectState === "object" ? projectState : {};
+    state.dateFilterStart = "";
+    state.dateFilterEnd = "";
+    state.dateFilterAuto = true;
+    state.autoShowAll = settings.autoShowAll === true;
+    state.autoFocus = settings.autoFocus === true;
+    setSimplifiedChrome(settings.simplifiedViewer === true);
+    state.startupDatasetId = String(settings.startupDatasetId ?? "");
+    state.startupBehaviorApplied = false;
+    lastScannedRelevantSignature = "";
+
+    if (state.app) {
+      if (state.simplifiedViewer) state.app.openRightPanel?.(PANEL_ID);
+      scheduleFullScan("project-settings", 8);
+    }
+  },
 
   activate(app) {
     state.app = app;
@@ -4036,6 +4216,22 @@ export const plugin = {
           }
         },
         {
+          id: "about",
+          label: "About & Licenses",
+          onSelect: () => {
+            app.openRightPanel?.(PANEL_ID);
+            renderPanelSafe();
+            nextAnimationFrame(() => {
+              const about = state.container?.querySelector?.(
+                "[data-role='about-licenses']"
+              );
+              if (!about) return;
+              about.open = true;
+              about.scrollIntoView?.({ block: "nearest" });
+            });
+          }
+        },
+        {
           id: "layer-diag",
           label: "Dump Layer Diagnostics",
           onSelect: () => {
@@ -4051,10 +4247,12 @@ export const plugin = {
       ]
     }) ?? null;
 
+    setSimplifiedChrome(state.simplifiedViewer);
     app.openRightPanel?.(PANEL_ID);
   },
 
   deactivate(app) {
+    setSimplifiedChrome(false);
     stopPlayback();
     restoreHiddenAnchorSymbolStyles();
     restoreSharedLayerFilters();
