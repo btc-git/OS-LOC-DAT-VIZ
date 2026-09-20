@@ -112,16 +112,19 @@ class KMLTemporalMetadataTests(unittest.TestCase):
             'osloc_dataset_id',
             'osloc_dataset_name',
             'osloc_event_id',
+            'osloc_source_row',
             'osloc_event_type',
             'osloc_component_type',
             'osloc_event_label',
         }
         self.assertTrue(set(metadata).issubset(allowed_keys))
         self.assertTrue({'osloc_schema_version', 'osloc_dataset_id', 'osloc_dataset_name',
-                         'osloc_event_id', 'osloc_event_type', 'osloc_component_type'}.issubset(set(metadata)))
+                 'osloc_event_id', 'osloc_source_row', 'osloc_event_type',
+                 'osloc_component_type'}.issubset(set(metadata)))
         self.assertEqual('1', metadata['osloc_schema_version'])
         UUID(metadata['osloc_dataset_id'])
         self.assertEqual('event_000001', metadata['osloc_event_id'])
+        self.assertEqual('2', metadata['osloc_source_row'])
         self.assertEqual(expected_event_type, metadata['osloc_event_type'])
         if 'osloc_event_label' in metadata:
             self.assertTrue(metadata['osloc_event_label'])
@@ -906,12 +909,13 @@ class KMLTemporalMetadataTests(unittest.TestCase):
 
     def test_tower_sector_balloon_description_has_source_precision_and_human_fields(self):
         settings = generator_settings()
+        settings['source_header_row'] = 3
         dataframe = pd.DataFrame([{
             'Timestamp': '2024-01-15T14:00:00Z',
             'Latitude': '43.123456789123',
             'Longitude': '-77.987654321987',
             'Azimuth': 240,
-        }])
+        }], index=[4])
         root = parse_kml(KMLGenerator('', 'Tower/Sector', settings).generate_cell_tower_kml(dataframe))
         sector = next(
             placemark
@@ -920,6 +924,9 @@ class KMLTemporalMetadataTests(unittest.TestCase):
         )
         description = sector.findtext('kml:description', namespaces=KML_NAMESPACE)
 
+        self.assertEqual('8', extended_data(sector)['osloc_source_row'])
+        self.assertIn('<b>Source Row:</b>', description)
+        self.assertIn('>8</td>', description)
         self.assertIn('43.123456789123, -77.987654321987', description)
         self.assertIn('<b>Azimuth:</b>', description)
         self.assertIn('240°', description)

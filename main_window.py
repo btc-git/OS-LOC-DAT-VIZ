@@ -1253,6 +1253,10 @@ class MainWindow(QMainWindow):
             'target_utc_offset_minutes': self.import_target_offset_minutes,
             'target_timezone_name': self.import_target_timezone_name,
             'source_date_order': self.source_date_order_combo.currentData(),
+            'source_header_row': (
+                self.import_metadata.get('header_row', 1)
+                if self.import_metadata else 1
+            ),
             'custom_label': self.custom_label_input.text().strip() or None
         }
         

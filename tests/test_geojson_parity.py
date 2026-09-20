@@ -138,9 +138,14 @@ class GeoJSONParityTests(unittest.TestCase):
         )
         for feature in payload['features']:
             properties = feature['properties']
+            self.assertEqual('2', properties['osloc_source_row'])
             self.assertEqual('2024-01-15T14:00:00Z', properties['osloc_start_time'])
             self.assertEqual(expected_start, properties['osloc_start_epoch_ms'])
             self.assertEqual(expected_start + 30 * 60 * 1000, properties['osloc_end_epoch_ms'])
+        self.assertTrue(any(
+            '<b>Source Row:</b>' in feature['properties'].get('description', '')
+            for feature in payload['features']
+        ))
 
     def test_distance_output_has_event_and_primitive_parity_with_kml(self):
         dataframe = pd.DataFrame([

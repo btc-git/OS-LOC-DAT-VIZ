@@ -985,7 +985,7 @@ class KMLGenerator(QThread):
                 ('Location', source_pair),
                 ('Accuracy', accuracy_display),
                 ('Accuracy Radius (derived)', f"{radius_miles:.6f} miles"),
-            ])
+            ], event_metadata['source_row'])
             placemark += textwrap.dedent(f'''\
                 <Placemark>
                     <name>{event_title}</name>
@@ -1024,7 +1024,7 @@ class KMLGenerator(QThread):
             ('Location', source_pair),
             ('Accuracy', accuracy_display),
             ('Point Visibility', 'Visible because supplied accuracy was missing or invalid' if radius_miles is None else 'Hidden anchor for circle event'),
-        ])
+        ], event_metadata['source_row'])
         placemark += textwrap.dedent(f'''\
                 <Placemark>
                     <name>{event_title}</name>
@@ -1452,6 +1452,22 @@ class KMLGenerator(QThread):
         """Create a deterministic identifier from the row's generation order."""
         return f"event_{row_position + 1:06d}"
 
+    def source_row_number(self, row_position, row):
+        """Return the one-based physical source row, including its header."""
+        source_index = getattr(row, 'name', row_position)
+        try:
+            source_offset = int(source_index)
+            if source_offset != source_index or source_offset < 0:
+                source_offset = row_position
+        except (TypeError, ValueError, OverflowError):
+            source_offset = row_position
+
+        try:
+            header_row = max(int(self.settings.get('source_header_row', 1)), 1)
+        except (TypeError, ValueError):
+            header_row = 1
+        return header_row + source_offset + 1
+
     def create_event_metadata(self, row_position, timestamp, event_type, row=None):
         """Create metadata once for every component of one logical input row."""
         kml_timestamp, display_label, source_timezone, timezone_description = (
@@ -1466,6 +1482,7 @@ class KMLGenerator(QThread):
         event_title = self.format_event_title(local_start, display_label)
         return {
             'event_id': self.create_event_id(row_position),
+            'source_row': self.source_row_number(row_position, row),
             'event_label': self.create_event_label(event_title, row),
             'title': event_title,
             'event_type': event_type,
@@ -1592,6 +1609,7 @@ class KMLGenerator(QThread):
             ])
         values.extend([
             ('osloc_event_id', event_metadata['event_id']),
+            ('osloc_source_row', event_metadata['source_row']),
             ('osloc_event_label', event_metadata['event_label'] if is_anchor else None),
             ('osloc_event_type', event_metadata['event_type']),
             ('osloc_component_type', component_type),
@@ -1978,7 +1996,9 @@ class KMLGenerator(QThread):
         )
         return f"{source_lat}, {source_lon}"
 
-    def build_description_table(self, rows):
+    def build_description_table(self, rows, source_row=None):
+        if source_row is not None:
+            rows = [('Source Row', source_row), *rows]
         table_rows = "".join(
             (
                 '<tr>'
@@ -2010,7 +2030,7 @@ class KMLGenerator(QThread):
             ('Sector Width', f"{self.settings['azimuth_spread']}°"),
             ('Sector Length', f"{self.settings['shaded_area_length']} miles"),
             ('Leg Length', f"{self.settings['leg_length']} miles"),
-        ])
+        ], event_metadata['source_row'])
         
         # Create folder to group sector and extended lines
         placemark = textwrap.dedent(f'''\
@@ -2082,7 +2102,7 @@ class KMLGenerator(QThread):
             ('Azimuth', f"{azimuth}°"),
             ('Leg Direction', f"{start_angle:.2f}°"),
             ('Leg Length', f"{leg_length} miles"),
-        ])
+        ], event_metadata['source_row'])
         placemark += textwrap.dedent(f'''\
                 <Placemark>
                     <name>{event_title} - Left leg</name>
@@ -2112,7 +2132,7 @@ class KMLGenerator(QThread):
             ('Azimuth', f"{azimuth}°"),
             ('Leg Direction', f"{end_angle:.2f}°"),
             ('Leg Length', f"{leg_length} miles"),
-        ])
+        ], event_metadata['source_row'])
         placemark += textwrap.dedent(f'''\
                 <Placemark>
                     <name>{event_title} - Right leg</name>
@@ -2150,7 +2170,7 @@ class KMLGenerator(QThread):
             ('Tower', source_pair),
             ('Coverage Radius', f"{self.settings['shaded_area_length']} miles"),
             ('Reason', 'Azimuth not available; using 360° coverage circle'),
-        ])
+        ], event_metadata['source_row'])
         
         # Create folder to group circle and center label
         placemark = textwrap.dedent(f'''\
@@ -2275,17 +2295,15 @@ class KMLGenerator(QThread):
         # Add timestamp for time animation
         placemark += self.create_time_element(time_range)
 
-        description_html = textwrap.dedent(f'''\
-            <table style="border-collapse: collapse;">
-                <tr><td style="padding: 2px 14px 2px 0;"><b>Tower:</b></td><td style="padding: 2px 0;">{source_pair}</td></tr>
-                <tr><td style="padding: 2px 14px 2px 0;"><b>Azimuth:</b></td><td style="padding: 2px 0;">{azimuth}°</td></tr>
-                <tr><td style="padding: 2px 14px 2px 0;"><b>Sector Width:</b></td><td style="padding: 2px 0;">{azimuth_spread}°</td></tr>
-                <tr><td style="padding: 2px 14px 2px 0;"><b>Distance:</b></td><td style="padding: 2px 0;">{distance_miles:.2f} miles</td></tr>
-                <tr><td style="padding: 2px 14px 2px 0;"><b>Band Area:</b></td><td style="padding: 2px 0;">{band_area_sq_miles:.2f} sq mi</td></tr>
-                <tr><td style="padding: 2px 14px 2px 0;"><b>Band Inner Width:</b></td><td style="padding: 2px 0;">{band_thickness_before} {band_units}</td></tr>
-                <tr><td style="padding: 2px 14px 2px 0;"><b>Band Outer Width:</b></td><td style="padding: 2px 0;">{band_thickness} {band_units}</td></tr>
-            </table>
-        ''').strip()
+        description_html = self.build_description_table([
+            ('Tower', source_pair),
+            ('Azimuth', f"{azimuth}°"),
+            ('Sector Width', f"{azimuth_spread}°"),
+            ('Distance', f"{distance_miles:.2f} miles"),
+            ('Band Area', f"{band_area_sq_miles:.2f} sq mi"),
+            ('Band Inner Width', f"{band_thickness_before} {band_units}"),
+            ('Band Outer Width', f"{band_thickness} {band_units}"),
+        ], event_metadata['source_row'])
         
         # 1. Create the shaded sector wedge
         placemark += textwrap.dedent(f'''\
@@ -2332,7 +2350,7 @@ class KMLGenerator(QThread):
             ('Leg Direction', f"{start_angle:.2f}°"),
             ('Leg Length', f"{leg_length} miles"),
             ('Distance', f"{distance_miles:.2f} miles"),
-        ])
+        ], event_metadata['source_row'])
         placemark += textwrap.dedent(f'''\
                 <Placemark>
                     <name>{event_title} - Left leg</name>
@@ -2363,7 +2381,7 @@ class KMLGenerator(QThread):
             ('Leg Direction', f"{end_angle:.2f}°"),
             ('Leg Length', f"{leg_length} miles"),
             ('Distance', f"{distance_miles:.2f} miles"),
-        ])
+        ], event_metadata['source_row'])
         placemark += textwrap.dedent(f'''\
                 <Placemark>
                     <name>{event_title} - Right leg</name>
@@ -2397,7 +2415,7 @@ class KMLGenerator(QThread):
         placemark += textwrap.dedent(f'''\
                 <Placemark>
                     <name>{event_title}</name>
-                    <description><![CDATA[{self.build_description_table([('Tower', source_pair), ('Distance', f"{distance_miles:.2f} miles")])}]]></description>
+                    <description><![CDATA[{self.build_description_table([('Tower', source_pair), ('Distance', f"{distance_miles:.2f} miles")], event_metadata['source_row'])}]]></description>
                     <Snippet maxLines="0"></Snippet>
         ''')
         
@@ -2461,7 +2479,7 @@ class KMLGenerator(QThread):
                     ('Distance', f"{distance_miles:.2f} miles"),
                     ('Band Inner', f"{inner_distance_miles:.2f} miles"),
                     ('Band Outer', f"{outer_distance_miles:.2f} miles"),
-                ])}]]></description>
+                ], event_metadata['source_row'])}]]></description>
                 <Snippet maxLines="0"></Snippet>
         ''')
 
@@ -2498,7 +2516,7 @@ class KMLGenerator(QThread):
                     ('Tower', self.source_coord_pair_text(lat, lon, lat_source_text, lon_source_text)),
                     ('Azimuth Span', f"{start_angle:.2f}° to {end_angle:.2f}°"),
                     ('Reported Distance', f"{distance_miles:.2f} miles"),
-                ])}]]></description>
+                ], event_metadata['source_row'])}]]></description>
                 <Snippet maxLines="0"></Snippet>
         ''')
 
@@ -2576,7 +2594,7 @@ class KMLGenerator(QThread):
                         ('Reported Distance', f"{distance_miles:.2f} miles"),
                         ('Band Inner', f"{inner_distance_miles:.2f} miles"),
                         ('Band Outer', f"{outer_distance_miles:.2f} miles"),
-                    ])}]]></description>
+                    ], event_metadata['source_row'])}]]></description>
                     <Snippet maxLines="0"></Snippet>
         ''')
         
@@ -2605,7 +2623,7 @@ class KMLGenerator(QThread):
                     <description><![CDATA[{self.build_description_table([
                         ('Tower', source_pair),
                         ('Reported Distance', f"{distance_miles:.2f} miles"),
-                    ])}]]></description>
+                    ], event_metadata['source_row'])}]]></description>
                     <Snippet maxLines="0"></Snippet>
         ''')
         
@@ -2630,7 +2648,7 @@ class KMLGenerator(QThread):
                     <description><![CDATA[{self.build_description_table([
                         ('Tower', source_pair),
                         ('Reported Distance', f"{distance_miles:.2f} miles"),
-                    ])}]]></description>
+                    ], event_metadata['source_row'])}]]></description>
                     <Snippet maxLines="0"></Snippet>
         ''')
         

@@ -1422,17 +1422,6 @@ function isUtcLikeTimezone(zone) {
   );
 }
 
-function eventDisplayIsUtc(event) {
-  if (isUtcLikeTimezone(event.timezone)) return true;
-
-  const local = String(event.localStart || "");
-  return /(?:Z|[+-]00:00)$/i.test(local);
-}
-
-function shouldShowUtcEquivalent(event) {
-  return isTemporalEvent(event) && !eventDisplayIsUtc(event);
-}
-
 function formatClock12(hour, minute, second = null) {
   const h = Number(hour);
   const m = Number(minute);
@@ -3634,12 +3623,6 @@ function showEventDetails(event, sourceFeature = null) {
 
         if (recordTime) add("Original record time", recordTime);
         if (zoneOffset) add("Time zone / offset", zoneOffset);
-
-        // The adjusted time is already the floating-panel title.
-        // Keep canonical UTC available only when it adds additional information.
-        if (shouldShowUtcEquivalent(event)) {
-          add("UTC equivalent", utcDateTime(event.startMs));
-        }
 
         add(
           state.durationOverrideMs === null
