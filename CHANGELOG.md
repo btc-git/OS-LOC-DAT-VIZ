@@ -11,7 +11,7 @@
 - Save & Open Viewer action with bundled GeoLibre Desktop, automatic plugin provisioning, and same-named project files
 - Open Viewer action for loading one or more existing KML or GeoJSON files without generating new outputs
 - Prominent Load GeoJSON action in the viewer panel for reopening validated OS-LOC exports
-- Project-scoped simplified GeoLibre chrome with automatic Show All and data framing
+- Project-scoped simplified GeoLibre chrome with automatic startup data framing
 - GeoLibre filter fields automatically suggest the first and last corrected record date/time
 - GeoLibre About & Licenses details with bundled plugin and viewer license notices
 - Application Licenses & Third-Party Notices dialog with the full GeoLibre MIT notice
@@ -30,6 +30,10 @@
 - Removed the one-minute backward and forward buttons from the GeoLibre timeline
 
 ### Fixed
+- GeoLibre now frames newly loaded data while leaving every record disabled
+- GeoLibre hidden-layer filters no longer trigger repeated MapLibre Diagnostics errors
+- GeoLibre datasets now start hidden, and the first Show All action immediately displays the selected-color evidence layers
+- GeoLibre now waits for newly requested datasets and suppresses late-ready generic host layers without requiring Hide All / Show All
 - Generated viewer projects keep the OS-LOC side panel expanded during GeoLibre project restoration
 - Hidden KML anchor points remain hidden without suppressing intentionally visible location points
 - GeoJSON timeline filters use bounded epoch comparisons instead of event-ID lists

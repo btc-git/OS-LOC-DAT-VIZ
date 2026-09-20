@@ -147,8 +147,8 @@ function makeConsolidatedEventScenario(features) {
     return { name: "consolidated", storeLayers, storeFeatures, styleLayers };
 }
 
-function makeGeojsonSharedLayerScenario(features) {
-    const layerId = "store_geojson_shared";
+function makeGeojsonSharedLayerScenario(features, layerId = "store_geojson_shared") {
+    const nativeSuffix = layerId === "store_geojson_shared" ? "" : `_${layerId}`;
     const storeLayers = [{ id: layerId, name: layerId, type: "geojson" }];
     const geojsonFeatures = features
         .filter(feature => eventKeyFromProps(feature.properties || {}))
@@ -196,7 +196,7 @@ function makeGeojsonSharedLayerScenario(features) {
 
     const styleLayers = [
         {
-            id: "native_shared_fill",
+            id: `native_shared_fill${nativeSuffix}`,
             source: `src_${layerId}`,
             "source-layer": layerId,
             type: "fill",
@@ -204,7 +204,7 @@ function makeGeojsonSharedLayerScenario(features) {
             layout: {},
         },
         {
-            id: "native_shared_line",
+            id: `native_shared_line${nativeSuffix}`,
             source: `src_${layerId}`,
             "source-layer": layerId,
             type: "line",
@@ -212,7 +212,7 @@ function makeGeojsonSharedLayerScenario(features) {
             layout: {},
         },
         {
-            id: "native_shared_symbol",
+            id: `native_shared_symbol${nativeSuffix}`,
             source: `src_${layerId}`,
             "source-layer": layerId,
             type: "symbol",
@@ -402,6 +402,7 @@ function buildRuntime(diag, scenario) {
         labelSetDataCalls: 0,
         labelFeatureCountLast: 0,
         fitBoundsCalls: 0,
+        fitBoundsArgs: [],
         openFloatingPanelCalls: 0,
         domCreates: 0,
         domListeners: 0,
@@ -418,6 +419,7 @@ function buildRuntime(diag, scenario) {
     const map = {
         getStyle() { return { layers: scenario.styleLayers }; },
         querySourceFeatures(sourceId, options) {
+            if (scenario.unreadySourceIds?.has(String(sourceId))) return [];
             const sid = String(sourceId || "").replace(/^src_/, "");
             const sourceLayer = options?.sourceLayer ? String(options.sourceLayer) : sid;
             return scenario.storeFeatures.get(sourceLayer) || [];
@@ -505,7 +507,10 @@ function buildRuntime(diag, scenario) {
         closeRightPanel() { },
         openFloatingPanel() { op.openFloatingPanelCalls++; },
         closeFloatingPanel() { },
-        fitBounds() { op.fitBoundsCalls++; }
+        fitBounds(bounds) {
+            op.fitBoundsCalls++;
+            op.fitBoundsArgs.push(bounds);
+        }
     };
 
     globalThis.document = makeDocumentMock(op);
@@ -564,6 +569,10 @@ function buildRuntime(diag, scenario) {
     diag.state.timelineBoundaries = [];
     diag.state.labelsLastEmpty = true;
     diag.state.labelLayersVisible = false;
+    diag.state.autoShowAll = false;
+    diag.state.autoFocus = false;
+    diag.state.startupDatasetId = "";
+    diag.state.startupBehaviorApplied = false;
 
     return { op, app, map, clickListeners };
 }
@@ -833,6 +842,14 @@ function runScanGateChecks(diag, scenario) {
         scenario.storeFeatures.set(newLayer.id, [newFeature]);
 
         app.listLayers = () => scenario.storeLayers;
+        const getLayerFeatures = app.getLayerFeatures.bind(app);
+        let newLayerFeatureReads = 0;
+        app.getLayerFeatures = id => {
+            if (id === newLayer.id && newLayerFeatureReads++ === 0) return [];
+            return getLayerFeatures(id);
+        };
+        diag.state.startupDatasetId = "dataset_new";
+        diag.state.startupBehaviorApplied = false;
 
         diag.scheduleFullScan("layer-list-change", 3);
         const thirdScanFeatureCalls = op.getLayerFeaturesCalls;
@@ -989,7 +1006,10 @@ function runGeojsonSharedLayerVisibilityCheck(diag, features) {
     for (const layer of pluginEvidenceLayers) {
         assert(layer.source === "src_store_geojson_shared", `Plugin layer must reuse the host source: ${layer.id}`);
         assert(layer.layout?.visibility === "none", `Initial hide-all must hide plugin layer: ${layer.id}`);
-        assert(JSON.stringify(layer.filter).includes("[\"==\",1,0]"), `Initial filter must reject all features: ${layer.id}`);
+        assert(
+            JSON.stringify(layer.filter).includes("[\"==\",[\"get\",\"__osloc_never_match__\"],true]"),
+            `Initial filter must reject all features: ${layer.id}`
+        );
     }
 
     assert(diag.state.mappingStats.sharedFilteredLayers > 0, "Plugin-owned shared-layer mapping should be active");
@@ -1122,6 +1142,92 @@ function runGeojsonSharedLayerVisibilityCheck(diag, features) {
     };
 }
 
+function runStartupAutoShowVisibilityCheck(diag, features) {
+    const scenario = makeGeojsonSharedLayerScenario(features.slice(0, 100));
+    const runtime = buildRuntime(diag, scenario);
+    const datasetId = eventKeyFromProps(
+        scenario.storeFeatures.values().next().value?.[0]?.properties || {}
+    ).split("::", 1)[0];
+    diag.state.autoShowAll = true;
+    diag.state.startupDatasetId = datasetId;
+    diag.state.startupBehaviorApplied = false;
+
+    const found = diag.scanAll("harness-startup-auto-show");
+    assert(found > 0, "Startup auto-show scenario should discover events");
+    assert(
+        diag.state.events.every(diag.shouldShow),
+        "Startup auto-show should enable every discovered event"
+    );
+
+    const ownedLayers = [...diag.state.pluginEvidenceLayerIds]
+        .map(layerId => runtime.map.getLayer(layerId))
+        .filter(Boolean);
+    assert(ownedLayers.length === 3, "Startup auto-show should create plugin evidence layers");
+    assert(
+        ownedLayers.every(layer => layer.layout?.visibility === "visible"),
+        "Startup auto-show must reveal newly created plugin evidence layers"
+    );
+
+    return { found, visibleOwnedLayers: ownedLayers.length };
+}
+
+function runStartupHiddenFocusCheck(diag) {
+    const scenario = makeGeojsonSharedLayerScenario([
+        {
+            type: "Feature",
+            properties: {
+                osloc_dataset_id: "existing_dataset",
+                osloc_event_id: "existing_event",
+                osloc_event_type: "location",
+                osloc_component_type: "location_point",
+            },
+            geometry: { type: "Point", coordinates: [0, 0] },
+        },
+        {
+            type: "Feature",
+            properties: {
+                osloc_dataset_id: "loaded_dataset",
+                osloc_event_id: "loaded_one",
+                osloc_event_type: "location",
+                osloc_component_type: "location_point",
+            },
+            geometry: { type: "Point", coordinates: [-77.61, 43.15] },
+        },
+        {
+            type: "Feature",
+            properties: {
+                osloc_dataset_id: "loaded_dataset",
+                osloc_event_id: "loaded_two",
+                osloc_event_type: "location",
+                osloc_component_type: "location_point",
+            },
+            geometry: { type: "Point", coordinates: [-77.62, 43.16] },
+        },
+    ]);
+    const runtime = buildRuntime(diag, scenario);
+    diag.state.autoShowAll = false;
+    diag.state.autoFocus = true;
+    diag.state.startupDatasetId = "loaded_dataset";
+    diag.state.startupBehaviorApplied = false;
+
+    const found = diag.scanAll("harness-startup-hidden-focus");
+    assert(found === 3, "Hidden startup focus should discover all datasets");
+    assert(diag.state.enabledEventKeys.size === 0, "Startup framing must not enable records");
+    assert(
+        [...diag.state.pluginEvidenceLayerIds].every(
+            layerId => runtime.map.getLayer(layerId)?.layout?.visibility === "none"
+        ),
+        "Startup framing must leave plugin evidence layers hidden"
+    );
+    assert(runtime.op.fitBoundsCalls === 1, "Startup framing should move the camera once");
+    assert(
+        JSON.stringify(runtime.op.fitBoundsArgs[0]) === JSON.stringify([-77.62, 43.15, -77.61, 43.16]),
+        "Startup framing should use only the newly loaded dataset bounds"
+    );
+
+    return { found, visible: 0, bounds: runtime.op.fitBoundsArgs[0] };
+}
+
 function runGeojsonClickResolutionCoverageCheck(diag) {
     const dataset = "diag_dataset";
     const synthetic = [
@@ -1186,10 +1292,105 @@ function runLateGeojsonOwnershipCheck(diag, features) {
     for (const layer of lateHostLayers) {
         const current = runtime.map.getLayer(layer.id);
         assert(current?.layout?.visibility === "none", `Late host layer must be hidden: ${layer.id}`);
-        assert(JSON.stringify(current?.filter) === JSON.stringify(["==", 1, 0]), `Late host layer must reject all features: ${layer.id}`);
+        assert(JSON.stringify(current?.filter) === JSON.stringify(["==", ["get", "__osloc_never_match__"], true]), `Late host layer must reject all features: ${layer.id}`);
     }
 
     return { found, ownedLayers: diag.state.pluginEvidenceLayerIds.size };
+}
+
+function runSecondGeojsonSourceReadinessCheck(diag, features) {
+    const first = makeGeojsonSharedLayerScenario(features.slice(0, 100));
+    const secondFeatures = features.slice(0, 100).map((feature, index) => ({
+        ...feature,
+        properties: {
+            ...(feature.properties || {}),
+            osloc_dataset_id: "second_dataset",
+            osloc_event_id: `second_${index}`,
+        },
+    }));
+    const second = makeGeojsonSharedLayerScenario(
+        secondFeatures,
+        "store_geojson_second"
+    );
+    const secondSourceId = "src_store_geojson_second";
+    const scenario = {
+        name: "second-geojson-source-readiness",
+        storeLayers: [...first.storeLayers, ...second.storeLayers],
+        storeFeatures: new Map([...first.storeFeatures, ...second.storeFeatures]),
+        styleLayers: [...first.styleLayers, ...second.styleLayers],
+        unreadySourceIds: new Set([secondSourceId]),
+    };
+    const runtime = buildRuntime(diag, scenario);
+
+    const found = diag.scanAll("harness-second-source-before-ready");
+    assert(found > 0, "Both store datasets should be available to the event scan");
+    assert(
+        [...diag.state.geojsonSourceGroups.values()].every(
+            group => group.sourceId !== secondSourceId
+        ),
+        "The second source should not be owned before its render features are ready"
+    );
+
+    scenario.unreadySourceIds.delete(secondSourceId);
+    diag.reconcileGeojsonRendering(secondSourceId);
+
+    const secondHostLayers = second.styleLayers.filter(
+        layer => !String(layer.id || "").startsWith("osloc-dat-viz-")
+    );
+    for (const layer of secondHostLayers) {
+        const current = runtime.map.getLayer(layer.id);
+        assert(
+            current?.layout?.visibility === "none",
+            `Late-ready second-source host layer must be hidden: ${layer.id}`
+        );
+        assert(
+            JSON.stringify(current?.filter) === JSON.stringify(["==", ["get", "__osloc_never_match__"], true]),
+            `Late-ready second-source host layer must reject all features: ${layer.id}`
+        );
+    }
+
+    assert(
+        [...diag.state.geojsonSourceGroups.values()].some(
+            group => group.sourceId === secondSourceId
+        ),
+        "Late-ready second source should receive plugin rendering ownership"
+    );
+
+    const secondOwnedLayers = scenario.styleLayers.filter(
+        layer => layer.metadata?.oslocSourceGroup ===
+            `${secondSourceId}\u0000store_geojson_second`
+    );
+    assert(secondOwnedLayers.length === 3, "Second source should have bounded plugin evidence layers");
+
+    const setAllVisible = enabled => {
+        diag.state.mode = "overview";
+        diag.state.enabledEventKeys = enabled
+            ? new Set(diag.state.events.map(event => event.key))
+            : new Set();
+        diag.state.enabledEventsVersion++;
+        diag.applyVisibility(true);
+    };
+    setAllVisible(true);
+    assert(
+        secondOwnedLayers.every(layer => layer.layout?.visibility === "visible"),
+        "Show All should display second-source plugin layers"
+    );
+    setAllVisible(false);
+    assert(
+        secondOwnedLayers.every(layer => layer.layout?.visibility === "none"),
+        "Hide All should hide second-source plugin layers"
+    );
+    setAllVisible(true);
+    assert(
+        secondOwnedLayers.every(layer => layer.layout?.visibility === "visible"),
+        "A second Show All should restore second-source plugin layers"
+    );
+    assert(
+        secondHostLayers.every(layer => layer.layout?.visibility === "none"),
+        "Generic second-source host layers must stay suppressed across visibility toggles"
+    );
+
+    return { found, ownedSources: diag.state.geojsonSourceGroups.size };
 }
 
 function runGeojsonFocusCheck(diag) {
@@ -1475,8 +1676,11 @@ async function main() {
     const consolidatedRecognition = runConsolidatedRecognitionCheck(diag, features);
     const shuffledOrdering = runShuffledFeatureOrderingCheck(diag, features);
     const geojsonSharedVisibility = runGeojsonSharedLayerVisibilityCheck(diag, features);
+    const startupAutoShowVisibility = runStartupAutoShowVisibilityCheck(diag, features);
+    const startupHiddenFocus = runStartupHiddenFocusCheck(diag);
     const geojsonClickResolutionCoverage = runGeojsonClickResolutionCoverageCheck(diag);
     const lateGeojsonOwnership = runLateGeojsonOwnershipCheck(diag, features);
+    const secondGeojsonSourceReadiness = runSecondGeojsonSourceReadinessCheck(diag, features);
     const geojsonFocus = runGeojsonFocusCheck(diag);
     const descriptionParity = runDescriptionParityCheck(diag);
     const presentationFormatting = runPresentationFormattingCheck(diag);
@@ -1497,8 +1701,11 @@ async function main() {
         consolidatedRecognition,
         shuffledOrdering,
         geojsonSharedVisibility,
+        startupAutoShowVisibility,
+        startupHiddenFocus,
         geojsonClickResolutionCoverage,
         lateGeojsonOwnership,
+        secondGeojsonSourceReadiness,
         geojsonFocus,
         descriptionParity,
         presentationFormatting,

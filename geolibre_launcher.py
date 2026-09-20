@@ -263,7 +263,7 @@ def _viewer_project_payload(name, map_view, layers, startup_dataset_id=None):
             "mapControlPositions": {},
             "settings": {
                 VIEWER_PLUGIN_ID: {
-                    "autoShowAll": True,
+                    "autoShowAll": False,
                     "autoFocus": True,
                     "simplifiedViewer": True,
                     "startupDatasetId": startup_dataset_id,

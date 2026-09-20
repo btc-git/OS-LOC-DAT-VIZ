@@ -4,7 +4,7 @@
  */
 
 const PLUGIN_ID = "osloc-dat-viz-viewer";
-const PLUGIN_VERSION = "0.0.41";
+const PLUGIN_VERSION = "0.0.44";
 const PANEL_ID = "osloc-dat-viz-panel";
 const DETAILS_ID = "osloc-dat-viz-details";
 const LABEL_SOURCE_ID = "osloc-dat-viz-time-labels-source";
@@ -13,7 +13,7 @@ const LABEL_POINT_LAYER_ID = "osloc-dat-viz-time-labels-point-layer";
 const EVIDENCE_LAYER_PREFIX = "osloc-dat-viz-evidence-";
 const START_EPOCH_PROPERTY = "osloc_start_epoch_ms";
 const END_EPOCH_PROPERTY = "osloc_end_epoch_ms";
-const NEVER_MATCH_FILTER = ["==", 1, 0];
+const NEVER_MATCH_FILTER = ["==", ["get", "__osloc_never_match__"], true];
 
 const SHARED_FILL_COMPONENTS = [
   "tower_sector",
@@ -41,6 +41,8 @@ let scanDebounceTimer = null;
 let playbackRaf = null;
 let scrubVisibilityTimer = null;
 let renderReconcileTimer = null;
+let renderReconcileAllSources = false;
+let renderReconcileSourceIds = new Set();
 let detachMapEvents = [];
 let simplifiedChromeObserver = null;
 let simplifiedToolbar = null;
@@ -391,7 +393,7 @@ function parseKmlColorAabbggrr(value, fallbackRgba) {
 }
 
 function anyEqualsExpr(prop, values) {
-  if (!values.length) return ["==", 1, 0];
+  if (!values.length) return NEVER_MATCH_FILTER;
   if (values.length === 1) return ["==", ["get", prop], values[0]];
   return ["any", ...values.map(value => ["==", ["get", prop], value])];
 }
@@ -727,7 +729,32 @@ function knownGeojsonGroupsForCurrentStyle(map) {
   return groups;
 }
 
-function reconcileGeojsonRendering() {
+function hasUnownedGeojsonEvidenceLayer(map, sourceId) {
+  if (!sourceId) return false;
+
+  const checkedSourceLayers = new Set();
+  const styleLayers = map?.getStyle?.()?.layers ?? [];
+
+  for (const layer of styleLayers) {
+    if (isPluginOwnedLayer(layer)) continue;
+    if (state.suppressedHostLayerIds.has(String(layer?.id ?? ""))) continue;
+    if (String(layer?.source ?? "") !== sourceId) continue;
+
+    const sourceLayer = String(layer?.["source-layer"] ?? "");
+    const key = sourceGroupKey(sourceId, sourceLayer);
+    if (state.geojsonSourceGroups.has(key)) return true;
+    if (checkedSourceLayers.has(key)) continue;
+    checkedSourceLayers.add(key);
+
+    if (isGeojsonEvidenceFeature(firstFeatureFromLayerSource(map, layer))) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function reconcileGeojsonRendering(changedSourceId = "") {
   const map = state.app?.getMap?.();
   if (!map || nativeReconcileInProgress || !state.events.length) return;
 
@@ -736,7 +763,8 @@ function reconcileGeojsonRendering() {
     const signature = nativeStyleSignature(map);
     if (
       signature !== lastNativeStyleSignature ||
-      !state.geojsonSourceGroups.size
+      !state.geojsonSourceGroups.size ||
+      hasUnownedGeojsonEvidenceLayer(map, changedSourceId)
     ) {
       rebuildNativeIndex(safeListLayers());
       state.sharedNativeLayerAppliedSignature = new Map();
@@ -776,11 +804,23 @@ function reconcileGeojsonRendering() {
   }
 }
 
-function scheduleRenderingReconcile() {
+function scheduleRenderingReconcile(event) {
+  const sourceId = String(event?.sourceId ?? event?.source?.id ?? "");
+  if (sourceId) renderReconcileSourceIds.add(sourceId);
+  else renderReconcileAllSources = true;
+
   if (renderReconcileTimer !== null) clearTimeout(renderReconcileTimer);
   renderReconcileTimer = setTimeout(() => {
     renderReconcileTimer = null;
-    reconcileGeojsonRendering();
+    const reconcileAll = renderReconcileAllSources;
+    const sourceIds = [...renderReconcileSourceIds];
+    renderReconcileAllSources = false;
+    renderReconcileSourceIds.clear();
+
+    if (reconcileAll) reconcileGeojsonRendering();
+    for (const sourceId of sourceIds) {
+      reconcileGeojsonRendering(sourceId);
+    }
   }, 80);
 }
 
@@ -908,7 +948,7 @@ function restoreSharedLayerFilters() {
 }
 
 function buildSharedLayerFilter(baseFilter, visibleKeys, useEventKeys = false) {
-  const impossible = ["==", 1, 0];
+  const impossible = NEVER_MATCH_FILTER;
   const ids = useEventKeys
     ? visibleKeys
     : visibleKeys.map(key => {
@@ -937,7 +977,7 @@ function allEventsEnabledForLayer(layerEventKeys) {
 
 function buildTimelineEpochFilter(baseFilter) {
   if (state.currentMs === null) {
-    return composeBaseFilter(baseFilter, ["==", 1, 0]);
+    return composeBaseFilter(baseFilter, NEVER_MATCH_FILTER);
   }
 
   const endExpression = state.durationOverrideMs === null
@@ -961,7 +1001,7 @@ function sharedLayerFilterState(layerId, layerEventKeys, visibleForLayer) {
     return {
       signature: "hidden",
       visibility: "none",
-      filter: composeBaseFilter(baseFilter, ["==", 1, 0]),
+      filter: composeBaseFilter(baseFilter, NEVER_MATCH_FILTER),
     };
   }
 
@@ -2094,7 +2134,10 @@ function scanAll(reason = "scan") {
   applyVisibility(true);
 
   if (applyStartupBehavior && state.autoFocus) {
-    nextAnimationFrame(() => focusEvents(state.events));
+    const startupEvents = state.startupDatasetId
+      ? state.events.filter(event => event.datasetId === state.startupDatasetId)
+      : state.events;
+    nextAnimationFrame(() => fitEvents(startupEvents));
   }
 
   // Keep the same timeline DOM alive unless the loaded OS-LOC data actually
@@ -2755,7 +2798,8 @@ function applyVisibility(force = false) {
   }
 
   for (const [layerId, layerEventKeys] of state.sharedNativeLayerEventKeys.entries()) {
-    if (!map.getLayer?.(layerId)) continue;
+    const nativeLayer = map.getLayer?.(layerId);
+    if (!nativeLayer) continue;
 
     const visibleForLayer = layerEventKeys.filter(key => visibleEventKeySet.has(key));
     const filterState = sharedLayerFilterState(
@@ -2764,11 +2808,17 @@ function applyVisibility(force = false) {
       visibleForLayer
     );
 
-    const previousVisibility = state.sharedNativeLayerVisibilityById.get(layerId) ?? "visible";
+    const previousVisibility = state.sharedNativeLayerVisibilityById.has(layerId)
+      ? state.sharedNativeLayerVisibilityById.get(layerId)
+      : String(nativeLayer.layout?.visibility ?? "visible");
     if (previousVisibility !== filterState.visibility) {
       try {
         map.setLayoutProperty?.(layerId, "visibility", filterState.visibility);
-      } catch { }
+        state.sharedNativeLayerVisibilityById.set(layerId, filterState.visibility);
+      } catch {
+        state.sharedNativeLayerVisibilityById.delete(layerId);
+      }
+    } else {
       state.sharedNativeLayerVisibilityById.set(layerId, filterState.visibility);
     }
 
@@ -2895,6 +2945,12 @@ function boundsForEvents(events) {
   }
 
   return found ? [west, south, east, north] : null;
+}
+
+function fitEvents(events) {
+  const targets = (events ?? []).filter(eventMatchesDateFilter);
+  const bounds = boundsForEvents(targets);
+  if (bounds) state.app?.fitBounds?.(bounds);
 }
 
 function stopPlayback() {
@@ -3041,8 +3097,7 @@ function focusEvents(events) {
   applyVisibility(true);
   renderPanelSafe();
 
-  const bounds = boundsForEvents(targets.filter(eventMatchesDateFilter));
-  if (bounds) state.app?.fitBounds?.(bounds);
+  fitEvents(targets);
 }
 
 function datasetEnabledState(dataset) {
@@ -3106,7 +3161,7 @@ function makeLoadGeoJsonControl() {
       status.textContent = `Loaded ${imported.name}.`;
       state.startupDatasetId = imported.datasetId;
       state.startupBehaviorApplied = false;
-      state.autoShowAll = true;
+      state.autoShowAll = false;
       state.autoFocus = true;
       scheduleFullScan("load-geojson", 8);
     } catch (error) {
@@ -4148,10 +4203,14 @@ function scheduleFullScan(reason, retries = 5) {
     scanDebounceTimer = null;
     const layers = safeListLayers();
     const signature = relevantLayerSignature(layers);
+    const startupDatasetPending = () => Boolean(
+      state.startupDatasetId && !state.startupBehaviorApplied
+    );
     const shouldSkip =
       signature &&
       signature === lastScannedRelevantSignature &&
-      state.events.length > 0;
+      state.events.length > 0 &&
+      !startupDatasetPending();
 
     if (shouldSkip) {
       state.lastScanReason = `${reason}-skipped-unchanged`;
@@ -4166,7 +4225,7 @@ function scheduleFullScan(reason, retries = 5) {
     if (scanRetryTimer !== null) clearInterval(scanRetryTimer);
 
     // Feature data is ready: no reason to continue recreating/re-indexing UI.
-    if (found > 0) {
+    if (found > 0 && !startupDatasetPending()) {
       scanRetryTimer = null;
       return;
     }
@@ -4184,7 +4243,11 @@ function scheduleFullScan(reason, retries = 5) {
 
       const retryLayers = safeListLayers();
       const retrySignature = relevantLayerSignature(retryLayers);
-      if (retrySignature === lastScannedRelevantSignature && state.events.length > 0) {
+      if (
+        retrySignature === lastScannedRelevantSignature &&
+        state.events.length > 0 &&
+        !startupDatasetPending()
+      ) {
         clearInterval(scanRetryTimer);
         scanRetryTimer = null;
         return;
@@ -4192,7 +4255,7 @@ function scheduleFullScan(reason, retries = 5) {
 
       const retryFound = scanAll(`${reason}-retry`);
       lastScannedRelevantSignature = retrySignature;
-      if (retryFound > 0) {
+      if (retryFound > 0 && !startupDatasetPending()) {
         clearInterval(scanRetryTimer);
         scanRetryTimer = null;
       }
@@ -4243,8 +4306,8 @@ export const plugin = {
     state.dateFilterStart = "";
     state.dateFilterEnd = "";
     state.dateFilterAuto = true;
-    state.autoShowAll = settings.autoShowAll === true;
-    state.autoFocus = settings.autoFocus === true;
+    state.autoShowAll = false;
+    state.autoFocus = true;
     setSimplifiedChrome(settings.simplifiedViewer === true);
     state.startupDatasetId = String(settings.startupDatasetId ?? "");
     state.startupBehaviorApplied = false;
@@ -4373,6 +4436,8 @@ export const plugin = {
     scanRetryTimer = null;
     scanDebounceTimer = null;
     renderReconcileTimer = null;
+    renderReconcileAllSources = false;
+    renderReconcileSourceIds.clear();
     lastLayerSignature = "";
     lastScannedRelevantSignature = "";
     lastNativeStyleSignature = "";

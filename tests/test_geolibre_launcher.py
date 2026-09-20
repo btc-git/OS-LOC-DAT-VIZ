@@ -52,7 +52,7 @@ class GeoLibreProjectTests(unittest.TestCase):
             self.assertEqual(
                 [VIEWER_PLUGIN_ID], project["plugins"]["activePluginIds"]
             )
-            self.assertTrue(plugin_settings["autoShowAll"])
+            self.assertFalse(plugin_settings["autoShowAll"])
             self.assertTrue(plugin_settings["autoFocus"])
             self.assertTrue(plugin_settings["simplifiedViewer"])
             self.assertIsNone(plugin_settings["startupDatasetId"])
@@ -94,7 +94,7 @@ class GeoLibreProjectTests(unittest.TestCase):
             self.assertTrue(layer["metadata"]["localFileReloadable"])
             self.assertNotIn("geojson", layer)
             self.assertEqual([VIEWER_PLUGIN_ID], project["plugins"]["activePluginIds"])
-            self.assertTrue(plugin_settings["autoShowAll"])
+            self.assertFalse(plugin_settings["autoShowAll"])
             self.assertTrue(plugin_settings["autoFocus"])
             self.assertTrue(plugin_settings["simplifiedViewer"])
             self.assertEqual("dataset-123", plugin_settings["startupDatasetId"])
