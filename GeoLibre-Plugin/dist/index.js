@@ -4,7 +4,7 @@
  */
 
 const PLUGIN_ID = "osloc-dat-viz-viewer";
-const PLUGIN_VERSION = "0.0.40";
+const PLUGIN_VERSION = "0.0.41";
 const PANEL_ID = "osloc-dat-viz-panel";
 const DETAILS_ID = "osloc-dat-viz-details";
 const LABEL_SOURCE_ID = "osloc-dat-viz-time-labels-source";
@@ -259,6 +259,37 @@ function eventKeyFromProps(p) {
   if (!eventId) return "";
   const dataset = datasetMeta(p);
   return `${dataset.id}::${eventId}`;
+}
+
+export function parseOslocGeoJson(text) {
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error("The selected file is not valid GeoJSON.");
+  }
+
+  if (data?.type !== "FeatureCollection" || !Array.isArray(data.features)) {
+    throw new Error("Select a GeoJSON FeatureCollection exported by OS-LOC-DAT-VIZ.");
+  }
+
+  const oslocFeature = data.features.find(feature =>
+    firstProp(feature?.properties ?? {}, "osloc_event_id")
+  );
+  const datasetId =
+    firstProp(data, "osloc_dataset_id", "osloc_export_id") ||
+    firstProp(oslocFeature?.properties ?? {}, "osloc_dataset_id", "osloc_export_id");
+
+  if (!oslocFeature || !datasetId) {
+    throw new Error("This GeoJSON does not contain OS-LOC-DAT-VIZ event metadata.");
+  }
+
+  const name =
+    firstProp(data, "osloc_dataset_name", "name") ||
+    firstProp(oslocFeature.properties, "osloc_dataset_name", "osloc_export_name") ||
+    "OS-LOC-DAT-VIZ data";
+
+  return { data, datasetId, name };
 }
 
 function isIntentionallyHiddenKmlAnchorFeature(feature) {
@@ -3031,6 +3062,72 @@ function makeButton(text, fn, className = "") {
   return button;
 }
 
+export async function loadOslocGeoJson(app = state.app) {
+  if (typeof app?.importTextFile !== "function" || typeof app?.addGeoJsonLayer !== "function") {
+    throw new Error("GeoJSON file loading is unavailable in this GeoLibre build.");
+  }
+
+  const text = await app.importTextFile({
+    description: "OS-LOC-DAT-VIZ GeoJSON",
+    extensions: ["geojson"],
+    mimeType: "application/geo+json",
+  });
+  if (text === null) return null;
+
+  const imported = parseOslocGeoJson(text);
+  const layerId = app.addGeoJsonLayer(imported.name, imported.data);
+  return { ...imported, layerId };
+}
+
+function makeLoadGeoJsonControl() {
+  const control = document.createElement("div");
+  control.className = "osloc-v028__load";
+
+  const description = document.createElement("span");
+  description.textContent = "Load one or more GeoJSON exports to review or compare. Use the controls below to filter the mapped data.";
+
+  const status = document.createElement("span");
+  status.className = "osloc-v028__load-status";
+  status.setAttribute("aria-live", "polite");
+
+  const canLoad =
+    typeof state.app?.importTextFile === "function" &&
+    typeof state.app?.addGeoJsonLayer === "function";
+  const button = makeButton("Load GeoJSON", async () => {
+    button.disabled = true;
+    button.textContent = "Loading...";
+    status.textContent = "";
+    status.dataset.kind = "";
+
+    try {
+      const imported = await loadOslocGeoJson();
+      if (!imported) return;
+
+      status.textContent = `Loaded ${imported.name}.`;
+      state.startupDatasetId = imported.datasetId;
+      state.startupBehaviorApplied = false;
+      state.autoShowAll = true;
+      state.autoFocus = true;
+      scheduleFullScan("load-geojson", 8);
+    } catch (error) {
+      status.textContent = error?.message ?? String(error);
+      status.dataset.kind = "error";
+    } finally {
+      button.disabled = !canLoad;
+      button.textContent = "Load GeoJSON";
+    }
+  }, "osloc-v028__load-button");
+
+  button.dataset.role = "load-geojson";
+  button.disabled = !canLoad;
+  button.title = canLoad
+    ? "Load an OS-LOC-DAT-VIZ .geojson file"
+    : "GeoJSON file loading is unavailable in this GeoLibre build";
+
+  control.append(description, button, status);
+  return control;
+}
+
 function makeDateFilterControl() {
   const control = document.createElement("section");
   control.className = "osloc-v028__date-filter";
@@ -3834,6 +3931,7 @@ function renderPanel() {
 
   const root = document.createElement("div");
   root.className = "osloc-v028";
+  root.appendChild(makeLoadGeoJsonControl());
 
   const toolbar = document.createElement("div");
   toolbar.className = "osloc-v028__toolbar";
@@ -3912,7 +4010,7 @@ function renderPanel() {
     empty.className = "osloc-v028__empty";
     empty.innerHTML =
       "<strong>Waiting for OS-LOC-DAT-VIZ data…</strong><br>" +
-      "Drag or load one or more KML or GeoJSON files into GeoLibre. The viewer will detect them automatically.";
+      "Use Load GeoJSON above for a previous export, or drag KML files into GeoLibre.";
 
     root.appendChild(empty);
     root.appendChild(makeAboutSection());

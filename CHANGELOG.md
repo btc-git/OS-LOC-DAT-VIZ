@@ -10,6 +10,7 @@
 - GeoLibre viewer plugin with event filtering, timeline playback, map labels, details, and focused navigation
 - Save & Open Viewer action with bundled GeoLibre Desktop, automatic plugin provisioning, and same-named project files
 - Open Viewer action for loading one or more existing KML or GeoJSON files without generating new outputs
+- Prominent Load GeoJSON action in the viewer panel for reopening validated OS-LOC exports
 - Project-scoped simplified GeoLibre chrome with automatic Show All and data framing
 - GeoLibre filter fields automatically suggest the first and last corrected record date/time
 - GeoLibre About & Licenses details with bundled plugin and viewer license notices

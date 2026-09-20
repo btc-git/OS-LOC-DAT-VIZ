@@ -3,8 +3,11 @@
 This directory contains the installable GeoLibre viewer plugin used with
 OS-LOC-DAT-VIZ KML and GeoJSON exports.
 
-The viewer supports inclusive local date/time filtering to the minute, filtered
-timeline playback, map labels, event details, and focused navigation.
+The viewer provides a prominent **Load GeoJSON** action for previous
+OS-LOC-DAT-VIZ exports and supports inclusive local date/time filtering to the
+minute, timeline playback, map labels, event details, and focused navigation.
+Additional GeoJSON exports can be loaded by repeating the action. KML remains
+available through GeoLibre drag and drop.
 The panel's **About & licenses** section identifies the GPL-licensed plugin and
 the bundled GeoLibre 3.0.0 viewer under its MIT License.
 

@@ -55,6 +55,47 @@ header.osloc-simplified-viewer-toolbar button[aria-label="OS-LOC-DAT-VIZ"] {
   opacity: .45
 }
 
+.osloc-v028__load {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px 10px;
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(127, 127, 127, .25)
+}
+
+.osloc-v028__load>span:first-child {
+  font-size: 11px;
+  opacity: .72
+}
+
+.osloc-v028 .osloc-v028__load-button {
+  min-height: 34px;
+  padding: 7px 12px;
+  color: #fff;
+  border-color: #1d4ed8;
+  background: #2563eb
+}
+
+.osloc-v028 .osloc-v028__load-button:hover {
+  background: #1d4ed8
+}
+
+.osloc-v028__load-status {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  color: #86efac
+}
+
+.osloc-v028__load-status:empty {
+  display: none
+}
+
+.osloc-v028__load-status[data-kind="error"] {
+  color: #fca5a5
+}
+
 .osloc-v028__toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -612,7 +653,7 @@ header.osloc-simplified-viewer-toolbar button[aria-label="OS-LOC-DAT-VIZ"] {
   white-space: nowrap;
 }
 
-/* v0.0.40 click-to-focus event navigation */
+/* v0.0.41 OS-LOC GeoJSON loading */
 .osloc-v028__date-filter {
   display: grid;
   gap: 7px;

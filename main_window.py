@@ -579,7 +579,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.progress_bar, 0)  # No stretch for progress bar
         
         # Generation actions
-        self.generate_button = QPushButton("Process")
+        self.generate_button = QPushButton("Save Outputs")
         self.generate_button.setToolTip("Process and save paired KML, GeoJSON, and TXT output files")
         self.generate_button.clicked.connect(lambda: self.generate_kml(open_viewer=False))
         self.generate_button.setMinimumHeight(30)
@@ -606,7 +606,7 @@ class MainWindow(QMainWindow):
             }
         """)
 
-        self.viewer_button = QPushButton("Process and Open Viewer")
+        self.viewer_button = QPushButton("Save & Open Viewer")
         self.viewer_button.setToolTip("Process all output files, then open the GeoJSON in the included GeoLibre viewer")
         self.viewer_button.clicked.connect(lambda: self.generate_kml(open_viewer=True))
         self.viewer_button.setMinimumHeight(30)

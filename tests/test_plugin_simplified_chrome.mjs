@@ -56,7 +56,9 @@ const plugin = pluginModule.default;
 const {
     eventDisplayMinute,
     eventMatchesDateTimeBounds,
+    loadOslocGeoJson,
     normalizeDateTimeFilterValue,
+    parseOslocGeoJson,
 } = pluginModule;
 const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
 assert.equal(plugin.version, manifest.version);
@@ -102,6 +104,42 @@ assert.equal(
     }),
     "2024-01-15T14:30",
 );
+
+const previousExport = {
+    type: "FeatureCollection",
+    osloc_dataset_id: "previous-export",
+    osloc_dataset_name: "Previous Export",
+    features: [{
+        type: "Feature",
+        properties: {
+            osloc_dataset_id: "previous-export",
+            osloc_event_id: "event-1",
+        },
+        geometry: { type: "Point", coordinates: [-77.61, 43.15] },
+    }],
+};
+assert.equal(parseOslocGeoJson(JSON.stringify(previousExport)).name, "Previous Export");
+assert.throws(
+    () => parseOslocGeoJson('{"type":"FeatureCollection","features":[]}'),
+    /OS-LOC-DAT-VIZ event metadata/,
+);
+
+let importOptions = null;
+let addedLayer = null;
+const imported = await loadOslocGeoJson({
+    importTextFile(options) {
+        importOptions = options;
+        return Promise.resolve(JSON.stringify(previousExport));
+    },
+    addGeoJsonLayer(name, data) {
+        addedLayer = { name, data };
+        return "loaded-layer";
+    },
+});
+assert.deepEqual(importOptions.extensions, ["geojson"]);
+assert.equal(imported.layerId, "loaded-layer");
+assert.equal(addedLayer.name, "Previous Export");
+assert.deepEqual(addedLayer.data, previousExport);
 assert.equal(
     eventDisplayMinute({
         startMs: Date.parse("2024-01-15T19:30:00Z"),
@@ -142,6 +180,7 @@ assert(styleSource.includes(`header.${simplifiedClass} button`));
 assert(styleSource.includes(`button[aria-label="OS-LOC-DAT-VIZ"]`));
 assert(pluginSource.includes('input.type = "datetime-local"'));
 assert(pluginSource.includes('input.step = "60"'));
+assert(pluginSource.includes('makeButton("Load GeoJSON"'));
 assert(styleSource.includes('input[type="datetime-local"]'));
 
 console.log("Simplified viewer chrome and date/time filter contracts passed.");
