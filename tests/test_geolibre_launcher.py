@@ -35,7 +35,7 @@ from geolibre_launcher import (
 )
 from license_dialog import LicenseDialog
 from main_window import MainWindow
-from import_wizard import SourceFileLoadWorker
+from import_wizard import ImportWizardDialog, SourceFileLoadWorker
 
 
 class GeoLibreProjectTests(unittest.TestCase):
@@ -209,6 +209,45 @@ class GeoLibreProcessTests(unittest.TestCase):
     @patch.object(geolibre_launcher, "provision_geolibre_integration")
     @patch.object(geolibre_launcher, "ensure_geolibre_installed")
     @patch.object(geolibre_launcher.subprocess, "Popen")
+    def test_generated_viewer_creates_companion_project(
+        self, popen_mock, install_mock, _provision_mock, _running_mock
+    ):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            executable_path = root / "portable" / GEOLIBRE_EXECUTABLE_NAME
+            executable_path.parent.mkdir(parents=True)
+            executable_path.write_bytes(b"viewer")
+            install_mock.return_value = executable_path
+            output_root = root / "outputs"
+            output_root.mkdir()
+            geojson_path = output_root / "records.geojson"
+            geojson_path.write_text(
+                json.dumps({"type": "FeatureCollection", "features": []}),
+                encoding="utf-8",
+            )
+
+            project_path = launch_geolibre_viewer(
+                geojson_path, runtime_root=root / "runtime"
+            )
+
+            expected_project_path = geojson_path.resolve().with_suffix(".geolibre")
+            self.assertEqual(expected_project_path, project_path)
+            self.assertEqual(
+                str(geojson_path.resolve()),
+                json.loads(project_path.read_text(encoding="utf-8"))["layers"][0][
+                    "sourcePath"
+                ],
+            )
+            self.assertEqual(
+                [str(executable_path), str(project_path.resolve())],
+                popen_mock.call_args.args[0],
+            )
+
+    @patch.object(geolibre_launcher, "_viewer_process", None)
+    @patch.object(geolibre_launcher, "_is_geolibre_process_running", return_value=False)
+    @patch.object(geolibre_launcher, "provision_geolibre_integration")
+    @patch.object(geolibre_launcher, "ensure_geolibre_installed")
+    @patch.object(geolibre_launcher.subprocess, "Popen")
     def test_launch_without_geojson_opens_empty_project(
         self, popen_mock, install_mock, _provision_mock, _running_mock
     ):
@@ -292,6 +331,26 @@ class GenerationActionTests(unittest.TestCase):
         )
         open_mock.assert_called_once_with()
 
+    def test_main_timezone_defaults_match_import_wizard(self):
+        with patch.object(MainWindow, "show_disclaimer_dialog"):
+            window = MainWindow()
+        self.addCleanup(window.close)
+
+        self.assertEqual(
+            "Fixed UTC+00:00", window.source_timezone_combo.currentText()
+        )
+        self.assertEqual("No Change", window.target_timezone_combo.currentText())
+        self.assertEqual(
+            [
+                window.source_timezone_combo.itemText(index)
+                for index in range(window.source_timezone_combo.count())
+            ],
+            [
+                window.target_timezone_combo.itemText(index)
+                for index in range(1, window.target_timezone_combo.count())
+            ],
+        )
+
     def test_license_dialog_includes_bundled_geolibre_notice(self):
         dialog = LicenseDialog()
         self.addCleanup(dialog.close)
@@ -312,18 +371,20 @@ class GenerationActionTests(unittest.TestCase):
         self.addCleanup(window.close)
 
         window.apply_import_timestamp_settings(SimpleNamespace(
-            selected_source_timezone_name="UTC",
+            selected_source_timezone_name=None,
             selected_source_offset_minutes=0,
             selected_target_timezone_name="America/New_York",
             selected_target_offset_minutes=0,
             selected_date_order="YMD",
         ))
 
-        self.assertEqual("UTC", window.source_timezone_combo.currentData())
         self.assertEqual(
-            "UTC (UTC+00:00)", window.source_timezone_combo.currentText()
+            (None, 0),
+            ImportWizardDialog.timezone_selection(window.source_timezone_combo),
         )
-        self.assertTrue(window.source_utc_offset_combo.isHidden())
+        self.assertEqual(
+            "Fixed UTC+00:00", window.source_timezone_combo.currentText()
+        )
         self.assertEqual(
             ("America/New_York", 0),
             (
@@ -342,9 +403,11 @@ class GenerationActionTests(unittest.TestCase):
             selected_date_order="DMY",
         ))
 
-        self.assertIsNone(window.source_timezone_combo.currentData())
-        self.assertEqual(-300, window.source_utc_offset_combo.currentData())
-        self.assertFalse(window.source_utc_offset_combo.isHidden())
+        self.assertEqual("Fixed UTC-05:00", window.source_timezone_combo.currentText())
+        self.assertEqual(
+            (None, -300),
+            ImportWizardDialog.timezone_selection(window.source_timezone_combo),
+        )
         self.assertEqual("No Change", window.target_timezone_combo.currentText())
         self.assertEqual(
             (None, None),
@@ -430,7 +493,8 @@ class GenerationActionTests(unittest.TestCase):
             root = Path(temporary_directory)
             source_path = root / "source.csv"
             source_path.write_text("Timestamp,Latitude,Longitude\n", encoding="utf-8")
-            output_path = root / "result.kml"
+            selected_path = root / "result.geojson"
+            kml_path = selected_path.with_suffix(".kml")
 
             with patch.object(MainWindow, "show_disclaimer_dialog"):
                 window = MainWindow()
@@ -438,12 +502,13 @@ class GenerationActionTests(unittest.TestCase):
             window.current_generation_source_file = str(source_path)
             window.current_generation_settings = {}
             window.open_viewer_after_generation = True
+            window.custom_label_input.setText("T-Mobile Location Estimates")
 
             with (
                 patch(
                     "main_window.QFileDialog.getSaveFileName",
-                    return_value=(str(output_path), "KML Files (*.kml)"),
-                ),
+                    return_value=(str(selected_path), "GeoJSON Files (*.geojson)"),
+                ) as save_dialog,
                 patch.object(window, "build_generation_log", return_value="log\n"),
                 patch.object(window, "start_geolibre_viewer") as launch_mock,
             ):
@@ -452,10 +517,16 @@ class GenerationActionTests(unittest.TestCase):
                     "geojson": '{"type":"FeatureCollection","features":[]}',
                 })
 
-            self.assertEqual("<kml/>", output_path.read_text(encoding="utf-8"))
-            self.assertTrue(output_path.with_suffix(".geojson").is_file())
-            self.assertEqual("log\n", output_path.with_suffix(".txt").read_text(encoding="utf-8"))
-            launch_mock.assert_called_once_with(output_path.with_suffix(".geojson"))
+            save_dialog.assert_called_once_with(
+                window,
+                "Save Processed Data Files",
+                str(root / "T-Mobile_Location_Estimates.geojson"),
+                "GeoJSON Files (*.geojson)",
+            )
+            self.assertEqual("<kml/>", kml_path.read_text(encoding="utf-8"))
+            self.assertTrue(selected_path.is_file())
+            self.assertEqual("log\n", selected_path.with_suffix(".txt").read_text(encoding="utf-8"))
+            launch_mock.assert_called_once_with(selected_path)
 
 
 if __name__ == "__main__":

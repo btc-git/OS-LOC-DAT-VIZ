@@ -3128,7 +3128,7 @@ function makeLoadGeoJsonControl() {
   control.className = "osloc-v028__load";
 
   const description = document.createElement("span");
-  description.textContent = "Load one or more GeoJSON exports to review or compare. Use the controls below to filter the mapped data.";
+  description.textContent = "Load one or more GeoJSON exports to review or compare. Use the controls below to filter the mapped data. Use your scroll wheel or + and - keys to zoom in and out.";
 
   const status = document.createElement("span");
   status.className = "osloc-v028__load-status";
@@ -3251,6 +3251,7 @@ function makeAboutSection() {
   const about = document.createElement("details");
   about.className = "osloc-v028__about";
   about.dataset.role = "about-licenses";
+  about.open = true;
 
   const summary = document.createElement("summary");
   summary.textContent = "About & licenses";
@@ -4172,8 +4173,8 @@ function renderPanel() {
     `unmapped events: ${state.mappingStats.unmappedEvents}`;
 
   diagnostics.append(summaryEl, detail);
-  root.appendChild(diagnostics);
   root.appendChild(makeAboutSection());
+  root.appendChild(diagnostics);
 
   c.appendChild(root);
   updateDynamicUI();

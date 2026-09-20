@@ -22,7 +22,6 @@ from kml_generator import KMLGenerator, TimestampResolutionError
 
 
 NAMED_TIMEZONE_CHOICES = [
-    ("UTC (UTC+00:00)", "UTC"),
     ("US Eastern (UTC-05:00 / UTC-04:00 DST)", "America/New_York"),
     ("US Central (UTC-06:00 / UTC-05:00 DST)", "America/Chicago"),
     ("US Mountain (UTC-07:00 / UTC-06:00 DST)", "America/Denver"),
@@ -555,7 +554,10 @@ class ImportWizardDialog(QDialog):
         """Start each newly selected record set in UTC without display conversion."""
         for index in range(self.source_timezone_combo.count()):
             selection = self.source_timezone_combo.itemData(index) or {}
-            if selection.get('timezone_name') == 'UTC':
+            if (
+                selection.get('timezone_name') is None
+                and selection.get('offset_minutes') == 0
+            ):
                 self.source_timezone_combo.setCurrentIndex(index)
                 break
         for index in range(self.target_timezone_combo.count()):

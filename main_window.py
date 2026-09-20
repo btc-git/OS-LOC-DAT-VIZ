@@ -74,10 +74,11 @@ class MainWindow(QMainWindow):
         self.show_disclaimer_dialog()
         
         # Add welcome message
-        self.add_status_message("Drag and drop a CSV or Excel file, or click 'Browse for File', to begin.")
-        self.add_status_message("Standard templates are detected automatically; other files open the column-mapping wizard.")
+        self.add_status_message("Drag and drop a CSV or Excel file, or click 'Browse for File', to get started.")
+        self.add_status_message("Click 'Import Original Records' to open the column-mapping wizard.")
+        self.add_status_message("Default templates (available in the Green menu button above) are detected automatically; other files open the column-mapping wizard.")
         self.add_status_message("Adjust settings and colors, then save outputs or save and open them in the included viewer.")
-        self.add_status_message("Each generation includes same-named KML, GeoJSON, and TXT files for review.")
+        self.add_status_message("Each generation includes same-named KML, GeoJSON, and TXT files.")
 
 
     
@@ -242,12 +243,12 @@ class MainWindow(QMainWindow):
         label_layout = QVBoxLayout()
         label_layout.setContentsMargins(20, 15, 0, 0)  # Indent and add top margin
         
-        custom_label_desc = QLabel("Custom label for Google Earth (optional):")
-        custom_label_desc.setStyleSheet("color: #888888; font-style: italic; font-size: 11px;")
+        custom_label_desc = QLabel("Record Name or Description (optional):")
+        custom_label_desc.setStyleSheet("color: #ffffff; font-style: normal; font-size: 12px;")
         label_layout.addWidget(custom_label_desc)
         
         self.custom_label_input = QLineEdit()
-        self.custom_label_input.setPlaceholderText("e.g., 'August 1 Warrant - Distance from Tower'")
+        self.custom_label_input.setPlaceholderText("e.g., 'T-Mobile Timing Advance - 555-1234'")
         self.custom_label_input.setMaximumWidth(300)
         self.custom_label_input.setStyleSheet("""
             QLineEdit {
@@ -438,28 +439,17 @@ class MainWindow(QMainWindow):
         )
         viz_layout.addWidget(source_timezone_label, row, 0)
         self.source_timezone_combo = QComboBox()
-        self.source_timezone_combo.addItem("Fixed UTC offset", None)
         for label, timezone_name in NAMED_TIMEZONE_CHOICES:
-            self.source_timezone_combo.addItem(label, timezone_name)
-        viz_layout.addWidget(self.source_timezone_combo, row, 1)
-        row += 1
-
-        self.source_offset_label = QLabel("Fixed source UTC offset:")
-        self.source_offset_label.setToolTip(
-            "Used only when Source timestamps are in is set to Fixed UTC offset. "
-            "Explicit offsets in source records take precedence."
-        )
-        viz_layout.addWidget(self.source_offset_label, row, 0)
-        self.source_utc_offset_combo = QComboBox()
-        for offset_minutes in FIXED_UTC_OFFSETS:
-            self.source_utc_offset_combo.addItem(
-                fixed_offset_label(offset_minutes), offset_minutes
+            self.source_timezone_combo.addItem(
+                label, timezone_choice_data(timezone_name=timezone_name)
             )
-        self.source_utc_offset_combo.setCurrentIndex(self.source_utc_offset_combo.findData(0))
-        viz_layout.addWidget(self.source_utc_offset_combo, row, 1)
-        self.source_timezone_combo.currentIndexChanged.connect(
-            self.update_source_timestamp_controls
-        )
+        for offset_minutes in FIXED_UTC_OFFSETS:
+            self.source_timezone_combo.addItem(
+                fixed_offset_label(offset_minutes),
+                timezone_choice_data(fixed_offset_minutes=offset_minutes),
+            )
+        self.set_source_timestamp_selection(None, 0)
+        viz_layout.addWidget(self.source_timezone_combo, row, 1)
         row += 1
 
         target_timezone_label = QLabel("Display timestamps as:")
@@ -487,7 +477,7 @@ class MainWindow(QMainWindow):
         viz_layout.addWidget(self.target_timezone_combo, row, 1)
         row += 1
 
-        date_order_label = QLabel("Source Date Format:")
+        date_order_label = QLabel("Date format in source records:")
         date_order_label.setToolTip(
             "Match the date order used in source timestamps; dash and slash separators are supported"
         )
@@ -501,7 +491,6 @@ class MainWindow(QMainWindow):
             self.source_date_order_combo.findData("MDY")
         )
         viz_layout.addWidget(self.source_date_order_combo, row, 1)
-        self.update_source_timestamp_controls()
         self.update_target_timestamp_selection()
         row += 1
         
@@ -561,7 +550,7 @@ class MainWindow(QMainWindow):
         
         tab_widget.addTab(color_tab, "Colors")
 
-        self.import_records_button = QPushButton("Import Records...")
+        self.import_records_button = QPushButton("Import Original Records")
         self.import_records_button.setToolTip(
             "Manually map and import source records using the same workflow used for non-template files"
         )
@@ -579,7 +568,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.progress_bar, 0)  # No stretch for progress bar
         
         # Generation actions
-        self.generate_button = QPushButton("Save Outputs")
+        self.generate_button = QPushButton("Process")
         self.generate_button.setToolTip("Process and save paired KML, GeoJSON, and TXT output files")
         self.generate_button.clicked.connect(lambda: self.generate_kml(open_viewer=False))
         self.generate_button.setMinimumHeight(30)
@@ -606,7 +595,7 @@ class MainWindow(QMainWindow):
             }
         """)
 
-        self.viewer_button = QPushButton("Save & Open Viewer")
+        self.viewer_button = QPushButton("Process and Open in Viewer")
         self.viewer_button.setToolTip("Process all output files, then open the GeoJSON in the included GeoLibre viewer")
         self.viewer_button.clicked.connect(lambda: self.generate_kml(open_viewer=True))
         self.viewer_button.setMinimumHeight(30)
@@ -889,18 +878,10 @@ class MainWindow(QMainWindow):
 
     def apply_import_timestamp_settings(self, dialog):
         """Mirror accepted import timestamp settings into the main controls."""
-        timezone_name = dialog.selected_source_timezone_name
-        timezone_index = self.source_timezone_combo.findData(timezone_name)
-        if timezone_index < 0 and timezone_name:
-            self.source_timezone_combo.addItem(timezone_name, timezone_name)
-            timezone_index = self.source_timezone_combo.count() - 1
-        self.source_timezone_combo.setCurrentIndex(max(timezone_index, 0))
-
-        offset_index = self.source_utc_offset_combo.findData(
+        self.set_source_timestamp_selection(
+            dialog.selected_source_timezone_name,
             dialog.selected_source_offset_minutes
         )
-        if offset_index >= 0:
-            self.source_utc_offset_combo.setCurrentIndex(offset_index)
 
         self.set_target_timestamp_selection(
             dialog.selected_target_timezone_name,
@@ -912,11 +893,28 @@ class MainWindow(QMainWindow):
         )
         self.source_date_order_combo.setCurrentIndex(max(date_order_index, 0))
 
-    def update_source_timestamp_controls(self, *_args):
-        """Show the fixed offset only when it controls source interpretation."""
-        uses_fixed_offset = self.source_timezone_combo.currentData() is None
-        self.source_offset_label.setVisible(uses_fixed_offset)
-        self.source_utc_offset_combo.setVisible(uses_fixed_offset)
+    def set_source_timestamp_selection(self, timezone_name, offset_minutes):
+        """Select a source-timezone choice by its semantic value."""
+        for index in range(self.source_timezone_combo.count()):
+            selection = self.source_timezone_combo.itemData(index) or {}
+            if timezone_name is not None:
+                matches = selection.get('timezone_name') == timezone_name
+            else:
+                matches = (
+                    selection.get('timezone_name') is None
+                    and selection.get('offset_minutes') == offset_minutes
+                )
+            if matches:
+                self.source_timezone_combo.setCurrentIndex(index)
+                return
+
+        if timezone_name:
+            self.source_timezone_combo.addItem(
+                timezone_name, timezone_choice_data(timezone_name=timezone_name)
+            )
+            self.source_timezone_combo.setCurrentIndex(
+                self.source_timezone_combo.count() - 1
+            )
 
     def set_target_timestamp_selection(self, timezone_name, offset_minutes):
         """Select a display-timezone choice by its semantic value."""
@@ -1231,6 +1229,9 @@ class MainWindow(QMainWindow):
         self.open_viewer_after_generation = open_viewer
         
         # Collect settings
+        source_timezone_name, source_utc_offset_minutes = (
+            ImportWizardDialog.timezone_selection(self.source_timezone_combo)
+        )
         settings = {
             'leg_length': self.leg_length_spinbox.value(),
             'shaded_area_length': self.shaded_area_spinbox.value(),
@@ -1248,8 +1249,8 @@ class MainWindow(QMainWindow):
             'default_accuracy': self.default_accuracy_spinbox.value(),
             'enable_time_animation': True,  # Always enabled
             'duration_minutes': self.duration_spinbox.value(),
-            'source_utc_offset_minutes': self.source_utc_offset_combo.currentData(),
-            'source_timezone_name': self.source_timezone_combo.currentData(),
+            'source_utc_offset_minutes': source_utc_offset_minutes,
+            'source_timezone_name': source_timezone_name,
             'target_utc_offset_minutes': self.import_target_offset_minutes,
             'target_timezone_name': self.import_target_timezone_name,
             'source_date_order': self.source_date_order_combo.currentData(),
@@ -1319,23 +1320,23 @@ class MainWindow(QMainWindow):
             # Clean custom label for filename
             safe_label = "".join(c for c in custom_label if c.isalnum() or c in (' ', '-', '_')).strip()
             safe_label = safe_label.replace(' ', '_')
-            suggested_filename = f"{safe_label}.kml"
+            suggested_filename = f"{safe_label}.geojson"
         else:
-            suggested_filename = f"{base_name}_visualization.kml"
+            suggested_filename = f"{base_name}_visualization.geojson"
             
         start_dir = str(Path(self.current_generation_source_file).parent / suggested_filename)
         
-        output_file, _ = QFileDialog.getSaveFileName(
+        selected_output_file, _ = QFileDialog.getSaveFileName(
             self,
-            "Save Output Files",
+            "Save Processed Data Files",
             start_dir,
-            "KML Files (*.kml);;All Files (*)"
+            "GeoJSON Files (*.geojson)"
         )
         
-        if output_file:
+        if selected_output_file:
             try:
                 output_path, geojson_path = self.write_visualization_outputs(
-                    output_file, kml_content, geojson_content
+                    selected_output_file, kml_content, geojson_content
                 )
                 self.add_status_message(
                     f"✅ KML file saved successfully: {output_path.name}"
@@ -1354,9 +1355,9 @@ class MainWindow(QMainWindow):
                 )
                 return
 
-            log_path = Path(output_file).with_suffix('.txt')
+            log_path = output_path.with_suffix('.txt')
             try:
-                log_path.write_text(self.build_generation_log(output_file), encoding='utf-8')
+                log_path.write_text(self.build_generation_log(output_path), encoding='utf-8')
                 self.add_status_message(f"✅ Generation log saved: {log_path.name}")
             except Exception as e:
                 self.add_status_message(f"⚠️ Output files were saved, but the generation log could not be saved: {str(e)}")
@@ -1371,7 +1372,7 @@ class MainWindow(QMainWindow):
             else:
                 self.set_generation_actions_enabled(True)
                 self.open_viewer_button.setEnabled(True)
-                self.open_file_location(output_file)
+                self.open_file_location(geojson_path)
         else:
             self.set_generation_actions_enabled(True)
             self.open_viewer_button.setEnabled(True)
@@ -1469,8 +1470,13 @@ class MainWindow(QMainWindow):
         if not geojson_content:
             raise ValueError("Generated GeoJSON content is empty")
 
-        output_path = Path(output_file)
-        geojson_path = output_path.with_suffix('.geojson')
+        selected_path = Path(output_file)
+        if selected_path.suffix.lower() == '.geojson':
+            geojson_path = selected_path
+            output_path = selected_path.with_suffix('.kml')
+        else:
+            output_path = selected_path.with_suffix('.kml')
+            geojson_path = selected_path.with_suffix('.geojson')
         output_path.write_text(kml_content, encoding='utf-8')
         geojson_path.write_text(geojson_content, encoding='utf-8')
         return output_path, geojson_path

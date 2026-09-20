@@ -36,12 +36,17 @@ class ImportWizardDialogUITests(unittest.TestCase):
         source_items = [dialog.source_timezone_combo.itemText(i) for i in range(dialog.source_timezone_combo.count())]
         target_items = [dialog.target_timezone_combo.itemText(i) for i in range(dialog.target_timezone_combo.count())]
 
-        self.assertEqual("UTC (UTC+00:00)", dialog.source_timezone_combo.currentText())
+        self.assertEqual("Fixed UTC+00:00", dialog.source_timezone_combo.currentText())
         self.assertEqual("No Change", dialog.target_timezone_combo.currentText())
         self.assertEqual((None, None), dialog.timezone_selection(dialog.target_timezone_combo))
         self.assertEqual(source_items, target_items[1:])
         self.assertEqual(len(NAMED_TIMEZONE_CHOICES) + len(FIXED_UTC_OFFSETS), len(source_items))
-        self.assertIn("UTC (UTC+00:00)", source_items)
+        self.assertNotIn("UTC (UTC+00:00)", source_items)
+        self.assertIn("Fixed UTC+00:00", source_items)
+        self.assertGreater(
+            source_items.index("Fixed UTC+00:00"),
+            source_items.index("Hawaii (UTC-10:00)"),
+        )
         self.assertIn("US Eastern (UTC-05:00 / UTC-04:00 DST)", source_items)
         self.assertIn("Fixed UTC-05:00", source_items)
         self.assertIn("Fixed UTC+05:30", source_items)
@@ -61,7 +66,7 @@ class ImportWizardDialogUITests(unittest.TestCase):
             dialog.load_file(str(path), background=False)
 
             self.assertEqual(
-                "UTC (UTC+00:00)", dialog.source_timezone_combo.currentText()
+                "Fixed UTC+00:00", dialog.source_timezone_combo.currentText()
             )
             self.assertEqual("No Change", dialog.target_timezone_combo.currentText())
 
