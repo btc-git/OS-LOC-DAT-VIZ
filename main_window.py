@@ -48,6 +48,7 @@ class MainWindow(QMainWindow):
         # Initialize variables
         self.data_file = None
         self.imported_dataframe = None
+        self.reference_sites_dataframe = None
         self.import_metadata = None
         self.import_target_timezone_name = None
         self.import_target_offset_minutes = None
@@ -314,6 +315,19 @@ class MainWindow(QMainWindow):
         self.azimuth_spinbox.setValue(120)
         viz_layout.addWidget(self.azimuth_spinbox, row, 1)
         row += 1
+
+        reference_radius_label = QLabel("Nearby Cell Site Radius (miles):")
+        reference_radius_label.setToolTip(
+            "With a cell site list, include unique sites within this distance "
+            "of a tower used by the imported records"
+        )
+        viz_layout.addWidget(reference_radius_label, row, 0)
+        self.reference_site_radius_spinbox = QDoubleSpinBox()
+        self.reference_site_radius_spinbox.setRange(0.1, 500.0)
+        self.reference_site_radius_spinbox.setValue(25.0)
+        self.reference_site_radius_spinbox.setSingleStep(5.0)
+        viz_layout.addWidget(self.reference_site_radius_spinbox, row, 1)
+        row += 1
         
         # Separator
         separator1 = QFrame()
@@ -545,8 +559,19 @@ class MainWindow(QMainWindow):
         self.gps_color_button.setStyleSheet(f"background-color: {self.kml_to_qt_color(self.gps_color)}")
         self.gps_color_button.clicked.connect(lambda: self.select_color("gps"))
         color_layout.addWidget(self.gps_color_button, 3, 1)
+
+        color_layout.addWidget(QLabel("Reference Site Dots:"), 4, 0)
+        self.reference_site_color_button = QPushButton()
+        self.reference_site_color = "ff000000"  # Black
+        self.reference_site_color_button.setStyleSheet(
+            f"background-color: {self.kml_to_qt_color(self.reference_site_color)}"
+        )
+        self.reference_site_color_button.clicked.connect(
+            lambda: self.select_color("reference_site")
+        )
+        color_layout.addWidget(self.reference_site_color_button, 4, 1)
         
-        color_layout.setRowStretch(4, 1)
+        color_layout.setRowStretch(5, 1)
         
         tab_widget.addTab(color_tab, "Colors")
 
@@ -827,6 +852,10 @@ class MainWindow(QMainWindow):
 
         self.data_file = dialog.source_path
         self.imported_dataframe = dialog.normalized_dataframe
+        self.reference_sites_dataframe = (
+            dialog.reference_sites_dataframe.copy()
+            if dialog.reference_sites_dataframe is not None else None
+        )
         self.import_metadata = {
             'worksheet': dialog.selected_sheet_name,
             'header_row': dialog.selected_header_row,
@@ -998,6 +1027,7 @@ class MainWindow(QMainWindow):
         if inspected_dataframe is None:
             self.data_file = file_path
             self.imported_dataframe = None
+            self.reference_sites_dataframe = None
             self.import_metadata = None
             self.import_target_timezone_name = None
             self.import_target_offset_minutes = None
@@ -1283,6 +1313,13 @@ class MainWindow(QMainWindow):
             'shaded_color': self.shaded_color,
             'band_color': self.band_color,
             'gps_color': self.gps_color,
+            'reference_site_color': self.reference_site_color,
+            'include_reference_sites': data_type in (
+                'Tower/Sector', 'Distance from Tower'
+            ),
+            'reference_site_radius_miles': (
+                self.reference_site_radius_spinbox.value()
+            ),
             'gps_units': self.gps_units_combo.currentText(),
             'ta_distance_units': self.ta_distance_units_combo.currentText(),
             'band_thickness_before': self.inside_band_spinbox.value(),  # New: inner band distance
@@ -1327,7 +1364,11 @@ class MainWindow(QMainWindow):
         
         # Create and start worker thread
         self.kml_generator = KMLGenerator(
-            self.data_file, data_type, settings, dataframe=self.imported_dataframe
+            self.data_file,
+            data_type,
+            settings,
+            dataframe=self.imported_dataframe,
+            reference_sites=self.reference_sites_dataframe,
         )
         self.kml_generator.progress.connect(self.progress_bar.setValue)
         self.kml_generator.finished.connect(self.on_generation_finished)
@@ -1667,6 +1708,9 @@ class MainWindow(QMainWindow):
             f"Shaded area color (KML AABBGGRR): {settings.get('shaded_color')}",
             f"Distance band color (KML AABBGGRR): {settings.get('band_color')}",
             f"Location point color (KML AABBGGRR): {settings.get('gps_color')}",
+            f"Reference site layer: {'Enabled' if settings.get('include_reference_sites') else 'Disabled'}",
+            f"Nearby cell site radius (miles): {settings.get('reference_site_radius_miles', 25.0)}",
+            f"Reference site color (KML AABBGGRR): {settings.get('reference_site_color', 'ff000000')}",
             f"Custom label: {settings.get('custom_label') or 'None'}",
             "",
             "Row outcomes",
@@ -1675,6 +1719,9 @@ class MainWindow(QMainWindow):
             f"Skipped - invalid coordinates: {summary.get('skipped_invalid_coordinates', 'Unknown')}",
             f"Skipped - missing timestamp: {summary.get('skipped_missing_timestamp', 'Unknown')}",
             f"Skipped - DST conflict: {summary.get('skipped_dst_conflict', 'Unknown')}",
+            f"Reference site source: {summary.get('reference_site_source', 'Not applicable')}",
+            f"Reference sites considered: {summary.get('reference_sites_considered', 0)}",
+            f"Static reference sites generated: {summary.get('reference_sites_generated', 0)}",
             "",
             "Generation warnings",
         ])

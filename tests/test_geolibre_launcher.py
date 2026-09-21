@@ -351,6 +351,28 @@ class GenerationActionTests(unittest.TestCase):
             ],
         )
 
+    @patch("main_window.KMLGenerator")
+    def test_generation_passes_reference_sites_and_settings(self, generator_class):
+        with patch.object(MainWindow, "show_disclaimer_dialog"):
+            window = MainWindow()
+        self.addCleanup(window.close)
+        reference_sites = object()
+        window.data_file = "records.csv"
+        window.reference_sites_dataframe = reference_sites
+        window.tower_radio.setChecked(True)
+        window.reference_site_radius_spinbox.setValue(15.0)
+        window.reference_site_color = "ff332211"
+
+        window.generate_kml()
+
+        arguments = generator_class.call_args
+        settings = arguments.args[2]
+        self.assertTrue(settings["include_reference_sites"])
+        self.assertEqual(15.0, settings["reference_site_radius_miles"])
+        self.assertEqual("ff332211", settings["reference_site_color"])
+        self.assertIs(reference_sites, arguments.kwargs["reference_sites"])
+        generator_class.return_value.start.assert_called_once_with()
+
     def test_license_dialog_includes_bundled_geolibre_notice(self):
         dialog = LicenseDialog()
         self.addCleanup(dialog.close)
@@ -546,7 +568,11 @@ class GenerationActionTests(unittest.TestCase):
                 window = MainWindow()
             self.addCleanup(window.close)
             window.current_generation_source_file = str(source_path)
-            window.current_generation_settings = {}
+            window.current_generation_settings = {
+                "include_reference_sites": True,
+                "reference_site_radius_miles": 25.0,
+                "reference_site_color": "ff000000",
+            }
             window.current_generation_type = "Distance from Tower"
             window.current_import_metadata = {
                 "worksheet": None,
@@ -600,7 +626,11 @@ class GenerationActionTests(unittest.TestCase):
                     },
                 },
             }
-            window.kml_generator = SimpleNamespace(audit_summary={})
+            window.kml_generator = SimpleNamespace(audit_summary={
+                "reference_site_source": "cell site list",
+                "reference_sites_considered": 12,
+                "reference_sites_generated": 5,
+            })
 
             log_text = window.build_generation_log(output_path)
             expected_cell_site_hash = window.calculate_file_sha256(
@@ -632,6 +662,11 @@ class GenerationActionTests(unittest.TestCase):
                 log_text,
             )
             self.assertIn("Latitude values from cell site list: 1", log_text)
+            self.assertIn("Reference site layer: Enabled", log_text)
+            self.assertIn("Nearby cell site radius (miles): 25.0", log_text)
+            self.assertIn("Reference site source: cell site list", log_text)
+            self.assertIn("Reference sites considered: 12", log_text)
+            self.assertIn("Static reference sites generated: 5", log_text)
 
 
 if __name__ == "__main__":

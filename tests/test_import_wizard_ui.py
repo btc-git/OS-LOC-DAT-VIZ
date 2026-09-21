@@ -520,6 +520,19 @@ class ImportWizardDialogUITests(unittest.TestCase):
                 "cell_site_only",
                 dialog.selected_cell_site_metadata["policy"],
             )
+            self.assertEqual(
+                ["Site ID", "Latitude", "Longitude", "CSL Source Rows"],
+                list(dialog.reference_sites_dataframe.columns),
+            )
+            self.assertEqual(
+                {
+                    "Site ID": 1001.0,
+                    "Latitude": 43.15,
+                    "Longitude": -77.61,
+                    "CSL Source Rows": (2,),
+                },
+                dialog.reference_sites_dataframe.iloc[0].to_dict(),
+            )
 
             dialog.mapping_combos["Timestamp"].setCurrentIndex(0)
             with patch("import_wizard.QMessageBox.warning") as warning:
@@ -562,6 +575,39 @@ class ImportWizardDialogUITests(unittest.TestCase):
         self.assertEqual(1, metadata["duplicate_keys_collapsed"])
         self.assertEqual(1, metadata["duplicate_rows_collapsed"])
         self.assertEqual(1, metadata["unreferenced_conflicting_keys_ignored"])
+
+    def test_reference_sites_omit_conflicting_and_incomplete_lookup_keys(self):
+        cell_sites = pd.DataFrame([
+            {"Node": 1001, "Sector": 1, "Lat": 43.1, "Lon": -77.1},
+            {"Node": "1001", "Sector": "1", "Lat": "43.10", "Lon": "-77.10"},
+            {"Node": 2002, "Sector": 2, "Lat": 44.1, "Lon": -78.1},
+            {"Node": 2002, "Sector": 2, "Lat": 45.1, "Lon": -79.1},
+            {"Node": 3003, "Sector": None, "Lat": 43.2, "Lon": -77.2},
+            {"Node": 4004, "Sector": 4, "Lat": 43.3, "Lon": -77.3},
+        ])
+
+        references = ImportWizardDialog.build_reference_site_dataframe(
+            cell_sites,
+            {
+                "Site ID": "Node",
+                "Sector ID": "Sector",
+                "Latitude": "Lat",
+                "Longitude": "Lon",
+            },
+            cell_site_header_row=4,
+        )
+
+        self.assertEqual(2, len(references))
+        self.assertEqual(
+            {1001, 4004},
+            {int(value) for value in references["Site ID"]},
+        )
+        rows_by_site = {
+            int(row["Site ID"]): row["CSL Source Rows"]
+            for _, row in references.iterrows()
+        }
+        self.assertEqual((5, 6), rows_by_site[1001])
+        self.assertEqual((10,), rows_by_site[4004])
 
     def test_conflicting_used_cell_site_key_reports_key_rows_and_fields(self):
         records = pd.DataFrame([{"Node": 1001, "Sector": 1}])

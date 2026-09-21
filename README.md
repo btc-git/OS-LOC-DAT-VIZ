@@ -27,12 +27,14 @@ A standalone desktop application for **quick triage and initial visualization** 
 - Adjustable sector width, leg length, and shaded area length
 - Configurable distance band (inner/outer) for Distance from Tower data
 - Color-coded data types with customizable colors
+- Static reference-site dots with a selectable color and a configurable nearby-CSL radius
 - Configurable unit support (Meters, Feet, Miles, Kilometers)
 - Time animation support for chronological display
 
 ### **Output & Interoperability**
 
 - Paired KML and GeoJSON exports with matching event and dataset metadata
+- Independently toggleable, untimed reference-site record set for tower-based outputs
 - KML output for Google Earth Pro and compatible GIS software
 - GeoJSON output optimized for GeoLibre/MapLibre workflows
 - Included [GeoLibre viewer plugin](GeoLibre-Plugin/README.md) for filtering, timeline playback, labels, and event details
@@ -71,6 +73,8 @@ Each generation writes a `.kml`, `.geojson`, and `.txt` file with the same base 
 For original carrier records that do not match a template, the import wizard opens automatically. It supports CSV, XLS, and XLSX files; worksheet and header-row selection; record-type selection; explicit column mapping; and optional inclusive date/time range filtering. Date selections include the complete start and end days by default; select **Use exact times** for narrower boundaries. **Check Matching Rows** reports both timestamp matches and rows with valid mapped coordinates before import. The filter uses the selected timezone interpretation, excludes timestamps that cannot be parsed or uniquely resolved, and records all filter counts and boundaries in the TXT generation log. Its live preview shows the first 25 source rows with each original column header and the application field currently mapped to it. Azimuth may be left unmapped when it is unavailable; the application will use a 360-degree visualization. Imported records are normalized in memory and the original file is not modified.
 
 Tower/Sector and Distance from Tower imports can optionally use a separate cell site list. Enable **Use a separate cell site list**, drop or browse to the CSL, select its worksheet and header row, then map a two-part lookup: the original record's site/node ID and sector/cell ID to the corresponding CSL columns. Map CSL cell tower/site latitude, cell tower/site longitude, and optionally sector azimuth. While enabled, the corresponding original-record mappings are disabled and ignored; timestamp, lookup IDs, and Distance from tower still come from the original records. An unmatched lookup leaves the tower fields blank. Repeated lookup keys with equivalent mapped tower values are collapsed automatically. Conflicting duplicates stop the import only when the original records reference that key; the message identifies its site/node ID, sector/cell ID, CSL rows, and differing mapped fields. The TXT generation log records the CSL filename and hash, mappings, source policy, duplicate counts, and match outcomes without recording lookup-key values.
+
+Tower-based outputs also contain a separate **Reference Sites** record set that can be toggled independently. Without a CSL, it contains each unique tower coordinate used by the records. With a CSL, it contains the used sites plus unique CSL sites within the configured radius of any used site; the default radius is 25 miles. Sectors sharing one coordinate are combined into one dot. Reference dots show every contributing CSL spreadsheet row, the mapped site ID when available, and the source coordinates. If no CSL is used, they show the contributing original-record rows instead. They use the color selected under **Reference Site Dots** and remain visible during timeline playback and date filtering.
 
 ### Data Format Reference
 

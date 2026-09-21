@@ -5,6 +5,7 @@
 ## [Unreleased]
 
 ### Added
+- Static, independently toggleable reference-site layers for tower-based KML and GeoJSON outputs, including unique record towers or radius-filtered CSL neighbors, configurable dot color, and a 25-mile default radius
 - Optional separate cell site list import for Tower/Sector and Distance from Tower records, with mapped two-column lookup keys, authoritative tower fields, previews, match accounting, and TXT-log provenance
 - Paired GeoJSON output with the same event identity, temporal metadata, geometry, and display colors as KML
 - Stable `osloc_*` dataset, event, component, timezone, and epoch metadata for interoperable viewers
@@ -20,6 +21,7 @@
 - Automated coverage for import-wizard behavior, temporal KML metadata, geometry preservation, and KML/GeoJSON parity
 
 ### Changed
+- Reference-site event cards, KML balloons, and GeoLibre details now identify contributing CSL spreadsheet rows (or original-record rows without a CSL), omit unavailable Site IDs, and replace generic static timing text with row provenance
 - Tower-based import labels now distinguish cell tower/site coordinates from Location Point coordinates; mapped-equivalent CSL duplicates are collapsed, while referenced conflicts report their keys, rows, and differing fields
 - KML now uses shared document styles, a flattened dataset folder, compact anchor metadata, and safe MultiGeometry consolidation to reduce import overhead
 - Source/evidence coordinates preserve supplied precision while derived geometry remains deterministically formatted

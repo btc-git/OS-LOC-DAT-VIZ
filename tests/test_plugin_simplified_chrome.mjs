@@ -59,6 +59,8 @@ const {
     loadOslocGeoJson,
     normalizeDateTimeFilterValue,
     parseOslocGeoJson,
+    referenceSiteRowDetails,
+    sharedPointVisibilityFilter,
 } = pluginModule;
 const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
 assert.equal(plugin.version, manifest.version);
@@ -78,6 +80,27 @@ assert.equal(
 );
 assert.equal(normalizeDateTimeFilterValue("2024-02-30T14:30"), null);
 assert.equal(normalizeDateTimeFilterValue("2024-01-15T24:00"), null);
+assert(
+    JSON.stringify(sharedPointVisibilityFilter()).includes('reference_site')
+);
+assert.deepEqual(
+    referenceSiteRowDetails({
+        eventType: "reference_site",
+        cslSourceRows: "12, 13",
+    }),
+    { label: "CSL Rows", value: "12, 13" },
+);
+assert.deepEqual(
+    referenceSiteRowDetails({
+        eventType: "reference_site",
+        sourceRows: "7",
+    }),
+    { label: "Source Row", value: "7" },
+);
+assert.equal(
+    referenceSiteRowDetails({ eventType: "tower_sector" }),
+    null,
+);
 
 const localEvent = {
     startMs: Date.parse("2024-01-15T19:30:59Z"),
@@ -95,6 +118,11 @@ assert(!eventMatchesDateTimeBounds(
     localEvent,
     "2024-01-15T14:31",
     "",
+));
+assert(eventMatchesDateTimeBounds(
+    { startMs: Number.NaN, endMs: Number.NaN },
+    "2024-01-15T14:31",
+    "2024-01-15T15:00",
 ));
 assert.equal(
     eventDisplayMinute({

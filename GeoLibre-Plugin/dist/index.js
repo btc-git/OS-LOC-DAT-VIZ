@@ -4,7 +4,7 @@
  */
 
 const PLUGIN_ID = "osloc-dat-viz-viewer";
-const PLUGIN_VERSION = "0.0.44";
+const PLUGIN_VERSION = "0.0.46";
 const PANEL_ID = "osloc-dat-viz-panel";
 const DETAILS_ID = "osloc-dat-viz-details";
 const LABEL_SOURCE_ID = "osloc-dat-viz-time-labels-source";
@@ -429,6 +429,7 @@ function stylePaletteForLayer(map, layer) {
   const gpsFillColor = firstProp(p, "osloc_style_gps_fill_color") || "4d00ff00";
   const reportedDistanceColor = firstProp(p, "osloc_style_reported_distance_color") || "ff000000";
   const distanceCenterColor = firstProp(p, "osloc_style_distance_center_color") || "ff0000ff";
+  const referenceSiteColor = firstProp(p, "osloc_style_reference_color") || "ff000000";
 
   return {
     legLine: parseKmlColorAabbggrr(legColor, "rgba(0, 0, 0, 1)"),
@@ -438,10 +439,11 @@ function stylePaletteForLayer(map, layer) {
     gpsFill: parseKmlColorAabbggrr(gpsFillColor, "rgba(0, 255, 0, 0.30)"),
     reportedDistance: parseKmlColorAabbggrr(reportedDistanceColor, "rgba(0, 0, 0, 1)"),
     distanceCenter: parseKmlColorAabbggrr(distanceCenterColor, "rgba(255, 0, 0, 1)"),
+    referenceSite: parseKmlColorAabbggrr(referenceSiteColor, "rgba(0, 0, 0, 1)"),
   };
 }
 
-function sharedPointVisibilityFilter() {
+export function sharedPointVisibilityFilter() {
   return ["any",
     ["all",
       ["==", ["get", "osloc_event_type"], "distance_only"],
@@ -450,6 +452,10 @@ function sharedPointVisibilityFilter() {
     ["all",
       ["==", ["get", "osloc_event_type"], "location"],
       ["==", ["get", "osloc_component_type"], "location_point"]
+    ],
+    ["all",
+      ["==", ["get", "osloc_event_type"], "reference_site"],
+      ["==", ["get", "osloc_component_type"], "reference_site"]
     ]
   ];
 }
@@ -525,6 +531,10 @@ function pluginEvidenceLayerDefinitions(group) {
     "osloc_style_distance_center_color_rgba",
     palette.distanceCenter
   );
+  const referenceSite = featureColorExpression(
+    "osloc_style_reference_color_rgba",
+    palette.referenceSite
+  );
 
   return [
     {
@@ -576,9 +586,13 @@ function pluginEvidenceLayerDefinitions(group) {
       paint: {
         "circle-color": ["case",
           ["==", ["get", "osloc_event_type"], "distance_only"], distanceCenter,
+          ["==", ["get", "osloc_event_type"], "reference_site"], referenceSite,
           gpsLine
         ],
-        "circle-radius": 4,
+        "circle-radius": ["case",
+          ["==", ["get", "osloc_event_type"], "reference_site"], 5,
+          4
+        ],
         "circle-stroke-width": 1,
         "circle-stroke-color": "rgba(0, 0, 0, 0.75)",
       },
@@ -889,9 +903,13 @@ function applySharedLayerStyling() {
       try {
         map.setPaintProperty?.(layerId, "circle-color", ["case",
           ["==", ["get", "osloc_event_type"], "distance_only"], palette.distanceCenter,
+          ["==", ["get", "osloc_event_type"], "reference_site"], palette.referenceSite,
           palette.gpsLine
         ]);
-        map.setPaintProperty?.(layerId, "circle-radius", 4);
+        map.setPaintProperty?.(layerId, "circle-radius", ["case",
+          ["==", ["get", "osloc_event_type"], "reference_site"], 5,
+          4
+        ]);
         map.setPaintProperty?.(layerId, "circle-stroke-width", 1);
         map.setPaintProperty?.(layerId, "circle-stroke-color", "rgba(0, 0, 0, 0.75)");
       } catch { }
@@ -903,7 +921,7 @@ function applySharedLayerStyling() {
       // semantics explicitly require visible points.
       const componentFilter = anyEqualsExpr(
         "osloc_component_type",
-        [...SHARED_FILL_COMPONENTS, ...SHARED_LINE_COMPONENTS, "center_point", "location_point"]
+        [...SHARED_FILL_COMPONENTS, ...SHARED_LINE_COMPONENTS, "center_point", "location_point", "reference_site"]
       );
       state.sharedNativeLayerBaseFilter.set(
         layerId,
@@ -920,10 +938,15 @@ function applySharedLayerStyling() {
             ["==", ["get", "osloc_event_type"], "location"],
             ["==", ["get", "osloc_component_type"], "location_point"]
           ], 1,
+          ["all",
+            ["==", ["get", "osloc_event_type"], "reference_site"],
+            ["==", ["get", "osloc_component_type"], "reference_site"]
+          ], 1,
           0
         ]);
         map.setPaintProperty?.(layerId, "icon-color", ["case",
           ["==", ["get", "osloc_event_type"], "distance_only"], palette.distanceCenter,
+          ["==", ["get", "osloc_event_type"], "reference_site"], palette.referenceSite,
           palette.gpsLine
         ]);
       } catch { }
@@ -1142,8 +1165,8 @@ function updateAutomaticDateFilterBounds() {
 }
 
 export function eventMatchesDateTimeBounds(event, start, end) {
+  if (!isTemporalEvent(event)) return true;
   const eventMinute = eventDisplayMinute(event);
-  if (!eventMinute) return false;
   if (start && eventMinute < start) return false;
   if (end && eventMinute > end) return false;
   return true;
@@ -1383,6 +1406,32 @@ function humanizeEventType(value) {
   return String(value || "Event")
     .replaceAll("_", " ")
     .replace(/\b\w/g, ch => ch.toUpperCase());
+}
+
+export function referenceSiteRowDetails(event) {
+  if (event?.eventType !== "reference_site") return null;
+
+  for (const [singular, plural, rawValue] of [
+    ["CSL Row", "CSL Rows", event.cslSourceRows],
+    ["Source Row", "Source Rows", event.sourceRows],
+  ]) {
+    const value = String(rawValue || "").trim();
+    if (!value) continue;
+    const rowCount = value.split(",").filter(part => part.trim()).length;
+    return { label: rowCount === 1 ? singular : plural, value };
+  }
+
+  return null;
+}
+
+function withoutReferenceRowDetails(description, rowDetails) {
+  if (!description || !rowDetails) return description;
+  const provenanceLine = `${rowDetails.label}: ${rowDetails.value}`;
+  return description
+    .split("\n")
+    .filter(line => line.trim() !== provenanceLine)
+    .join("\n")
+    .trim();
 }
 
 function formatDurationMs(durationMs) {
@@ -1990,6 +2039,8 @@ function scanAll(reason = "scan") {
 
           label: firstProp(p, "osloc_event_label"),
           eventType: firstProp(p, "osloc_event_type"),
+          cslSourceRows: firstProp(p, "osloc_csl_source_rows"),
+          sourceRows: firstProp(p, "osloc_source_rows"),
 
           description: parseDescription(
             firstProp(p, "description", "Description", "popupContent", "popup")
@@ -2024,6 +2075,8 @@ function scanAll(reason = "scan") {
       event.timezone ||= firstProp(p, "osloc_timezone");
       event.label ||= firstProp(p, "osloc_event_label");
       event.eventType ||= firstProp(p, "osloc_event_type");
+      event.cslSourceRows ||= firstProp(p, "osloc_csl_source_rows");
+      event.sourceRows ||= firstProp(p, "osloc_source_rows");
 
       if (!event.description) {
         event.description = parseDescription(
@@ -3585,7 +3638,10 @@ function showEventDetails(event, sourceFeature = null) {
   // Keep the adjusted date/time in the chrome and put the dataset name directly
   // below it in the panel body so long export names are not truncated.
   const panelTitle = formatMainEventLabel(event);
-  const detailDescription = detailDescriptionForFeature(event, sourceFeature);
+  const referenceRows = referenceSiteRowDetails(event);
+  const detailDescription = withoutReferenceRowDetails(
+    detailDescriptionForFeature(event, sourceFeature), referenceRows
+  );
 
   unregisterDetails = state.app?.registerFloatingPanel?.({
     id: DETAILS_ID,
@@ -3631,7 +3687,9 @@ function showEventDetails(event, sourceFeature = null) {
             : "Display duration (viewer)",
           formatDisplayDuration(event)
         );
-      } else {
+      } else if (referenceRows) {
+        add(referenceRows.label, referenceRows.value);
+      } else if (event.eventType !== "reference_site") {
         add("Timing", "Static / non-temporal");
       }
 
@@ -3789,6 +3847,13 @@ function makeEventRow(event) {
     duration.textContent =
       `${state.durationOverrideMs === null ? "Display duration" : "Display duration (viewer)"}: ${formatDisplayDuration(event)}`;
     body.append(duration);
+  } else if (event.eventType === "reference_site") {
+    const referenceRows = referenceSiteRowDetails(event);
+    if (referenceRows) {
+      const provenance = document.createElement("span");
+      provenance.textContent = `${referenceRows.label}: ${referenceRows.value}`;
+      body.append(provenance);
+    }
   } else {
     const staticLabel = document.createElement("span");
     staticLabel.textContent = "Static / non-temporal";

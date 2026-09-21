@@ -308,6 +308,7 @@ class ImportWizardDialog(QDialog):
         self.selected_mappings = {}
         self.selected_filter_metadata = {'enabled': False}
         self.selected_cell_site_metadata = {'enabled': False}
+        self.reference_sites_dataframe = None
         self.selected_sheet_name = None
         self.selected_header_row = 1
         self.mapping_combos = {}
@@ -1728,6 +1729,7 @@ class ImportWizardDialog(QDialog):
 
     def apply_cell_site_list(self, normalized, source_dataframe=None):
         """Resolve optional CSL fields and return metadata suitable for the log."""
+        self.reference_sites_dataframe = None
         if not self.cell_site_list_enabled():
             return normalized, {'enabled': False}
 
@@ -1738,6 +1740,11 @@ class ImportWizardDialog(QDialog):
         )
         original_key_mappings, cell_site_mappings = (
             self.validate_cell_site_configuration()
+        )
+        self.reference_sites_dataframe = self.build_reference_site_dataframe(
+            self.cell_site_dataframe,
+            cell_site_mappings,
+            self.cell_site_header_row_spinbox.value(),
         )
         policy = self.cell_site_policy_combo.currentData()
         resolved, resolution_metadata = self.resolve_cell_site_fields(
@@ -1778,6 +1785,48 @@ class ImportWizardDialog(QDialog):
         ]
         metadata['source_row_audit_limit'] = self.CELL_SITE_ROW_AUDIT_LIMIT
         return resolved, metadata
+
+    @classmethod
+    def build_reference_site_dataframe(
+        cls, cell_site_dataframe, mappings, cell_site_header_row=1
+    ):
+        """Keep complete CSL keys with one unambiguous mapped location."""
+        groups = {}
+        for position, (_, row) in enumerate(cell_site_dataframe.iterrows()):
+            key = tuple(
+                cls.normalize_lookup_value(row[mappings[field]])
+                for field in ('Site ID', 'Sector ID')
+            )
+            if any(value is None for value in key):
+                continue
+            groups.setdefault(key, []).append((position, row))
+
+        reference_rows = []
+        for entries in groups.values():
+            coordinate_signatures = {
+                tuple(
+                    cls.normalize_mapped_tower_value(row[mappings[field]])
+                    for field in ('Latitude', 'Longitude')
+                )
+                for _position, row in entries
+            }
+            if len(coordinate_signatures) != 1:
+                continue
+            first_row = entries[0][1]
+            reference_rows.append({
+                field: first_row[mappings[field]]
+                for field in ('Site ID', 'Latitude', 'Longitude')
+            } | {
+                'CSL Source Rows': tuple(
+                    position + max(int(cell_site_header_row), 1) + 1
+                    for position, _row in entries
+                )
+            })
+
+        return pd.DataFrame(
+            reference_rows,
+            columns=('Site ID', 'Latitude', 'Longitude', 'CSL Source Rows'),
+        )
 
     def build_normalized_dataframe(self, mappings, source_dataframe=None):
         """Build the in-memory application columns from source mappings."""

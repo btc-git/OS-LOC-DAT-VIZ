@@ -12,7 +12,7 @@ import json
 from decimal import Decimal, InvalidOperation
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4, uuid5
 from zoneinfo import ZoneInfo
 import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape as xml_escape
@@ -32,6 +32,7 @@ EVENT_TYPES = {
     'distance_only': 'distance_only',
     'location': 'location',
     'location_accuracy': 'location_accuracy',
+    'reference_site': 'reference_site',
 }
 
 COMPONENT_TYPES = {
@@ -44,6 +45,7 @@ COMPONENT_TYPES = {
     'reported_distance': 'reported_distance',
     'accuracy_circle': 'accuracy_circle',
     'location_point': 'location_point',
+    'reference_site': 'reference_site',
 }
 
 
@@ -54,14 +56,19 @@ class KMLGenerator(QThread):
     error = pyqtSignal(str)     # error message
     status_message = pyqtSignal(str)  # status messages for console
     
-    def __init__(self, data_file, data_type, settings, dataframe=None):
+    def __init__(self, data_file, data_type, settings, dataframe=None,
+                 reference_sites=None):
         super().__init__()
         self.data_file = data_file
         self.data_type = data_type
         self.settings = settings
         self.dataframe = dataframe
+        self.reference_sites = reference_sites
         self.audit_summary = {}
         self.export_metadata = None
+        self._reference_site_cache_key = None
+        self._reference_site_cache = []
+        self._reference_site_stats = {}
 
     @staticmethod
     def format_coord(value):
@@ -192,6 +199,20 @@ class KMLGenerator(QThread):
                 <visibility>0</visibility>
 {textwrap.indent(placemarks, '        ')}            </Folder>
         ''')
+
+    def reference_dataset_metadata(self, dataset_name):
+        """Return a stable second dataset identity for static site points."""
+        if not self.export_metadata:
+            self.begin_export(dataset_name)
+        reference_name = f"{dataset_name} - Reference Sites"
+        reference_id = uuid5(
+            UUID(self.export_metadata['osloc_dataset_id']), 'reference-sites'
+        )
+        return {
+            'osloc_schema_version': OSLOC_SCHEMA_VERSION,
+            'osloc_dataset_id': str(reference_id),
+            'osloc_dataset_name': reference_name,
+        }
 
     def maybe_flatten_event_fragment(self, fragment):
         fragment = self.maybe_consolidate_event_fragment(fragment)
@@ -407,6 +428,9 @@ class KMLGenerator(QThread):
         gps_poly_color = f"4d{self.settings['gps_color'][2:]}"
         leg_color = self.settings['leg_color']
         gps_color = self.settings['gps_color']
+        reference_site_color = self.settings.get(
+            'reference_site_color', 'ff000000'
+        )
 
         styles = {
             'tower-area': textwrap.dedent(f'''\
@@ -477,6 +501,17 @@ class KMLGenerator(QThread):
                     <IconStyle><color>ffffffff</color></IconStyle>
                 </Style>
             '''),
+            'reference-site': textwrap.dedent(f'''\
+                <Style id="{self.style_id('reference-site')}">
+{self.create_balloon_style(f"{indent}    ")}
+                    <IconStyle>
+                        <scale>0.75</scale>
+                        <color>{reference_site_color}</color>
+                        <Icon><href>http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png</href></Icon>
+                    </IconStyle>
+                    <LabelStyle><scale>0</scale></LabelStyle>
+                </Style>
+            '''),
             'tower-sector-event': textwrap.dedent(f'''\
                 <Style id="{self.style_id('tower-sector-event')}">
 {self.create_balloon_style(f"{indent}    ")}
@@ -545,6 +580,7 @@ class KMLGenerator(QThread):
             'location-hidden',
             'location-visible',
             'pin-default',
+            'reference-site',
             'tower-sector-event',
             'tower-circle-event',
             'distance-only-event',
@@ -631,6 +667,232 @@ class KMLGenerator(QThread):
         lon2 = lon1 + math.atan2(math.sin(azimuth) * math.sin(d_div_r) * math.cos(lat1),
                                  math.cos(d_div_r) - math.sin(lat1) * math.sin(lat2))
         return math.degrees(lat2), math.degrees(lon2)
+
+    @staticmethod
+    def distance_between_points_miles(first_lat, first_lon, second_lat,
+                                      second_lon):
+        """Return great-circle distance using the generator's 3960-mile Earth."""
+        first_lat_radians = math.radians(first_lat)
+        second_lat_radians = math.radians(second_lat)
+        latitude_delta = second_lat_radians - first_lat_radians
+        longitude_delta = math.radians(second_lon - first_lon)
+        haversine_value = (
+            math.sin(latitude_delta / 2) ** 2
+            + math.cos(first_lat_radians)
+            * math.cos(second_lat_radians)
+            * math.sin(longitude_delta / 2) ** 2
+        )
+        central_angle = 2 * math.asin(
+            math.sqrt(min(max(haversine_value, 0.0), 1.0))
+        )
+        return 3960.0 * central_angle
+
+    @staticmethod
+    def reference_site_id_text(value):
+        if pd.isna(value) or not str(value).strip():
+            return None
+        text = str(value).strip()
+        if re.fullmatch(r'[+-]?\d+\.0+', text):
+            return text.split('.', 1)[0]
+        return text
+
+    @staticmethod
+    def reference_row_numbers(value):
+        if isinstance(value, (list, tuple, set)):
+            candidates = value
+        elif value is None or pd.isna(value):
+            return []
+        else:
+            candidates = re.split(r'\s*,\s*', str(value).strip())
+
+        row_numbers = []
+        for candidate in candidates:
+            try:
+                number = float(candidate)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(number) and number.is_integer() and number >= 1:
+                row_number = int(number)
+                if row_number not in row_numbers:
+                    row_numbers.append(row_number)
+        return row_numbers
+
+    def grouped_reference_sites(self, dataframe, include_source_rows=False):
+        """Combine sectors and repeated rows that share one physical location."""
+        grouped = {}
+        for row_position, (_, row) in enumerate(dataframe.iterrows()):
+            coordinates = self.get_valid_coordinates_with_text(row)
+            if coordinates is None:
+                continue
+            lat, lon, lat_text, lon_text = coordinates
+            location_key = (lat, lon)
+            if location_key not in grouped:
+                grouped[location_key] = {
+                    'latitude': lat,
+                    'longitude': lon,
+                    'latitude_text': lat_text,
+                    'longitude_text': lon_text,
+                    'site_ids': [],
+                    'csl_source_rows': [],
+                    'source_rows': [],
+                }
+            site_id = self.reference_site_id_text(self.get_column_value(
+                row,
+                ['Site ID', 'Site', 'Site Name', 'Tower ID', 'Tower',
+                 'Tower Name', 'Node ID', 'Node'],
+            ))
+            if site_id and site_id not in grouped[location_key]['site_ids']:
+                grouped[location_key]['site_ids'].append(site_id)
+            csl_source_rows = self.reference_row_numbers(
+                row['CSL Source Rows']
+                if 'CSL Source Rows' in row.index else None
+            )
+            for source_row in csl_source_rows:
+                if source_row not in grouped[location_key]['csl_source_rows']:
+                    grouped[location_key]['csl_source_rows'].append(source_row)
+            if include_source_rows and not csl_source_rows:
+                source_row = self.source_row_number(row_position, row)
+                if source_row not in grouped[location_key]['source_rows']:
+                    grouped[location_key]['source_rows'].append(source_row)
+        return list(grouped.values())
+
+    def reference_sites_for_records(self, records):
+        """Select unique used sites and radius-limited CSL neighbors."""
+        cache_key = (id(records), id(self.reference_sites))
+        if self._reference_site_cache_key == cache_key:
+            return self._reference_site_cache
+
+        enabled = bool(self.settings.get('include_reference_sites', False))
+        if not enabled or self.data_type not in (
+            'Tower/Sector', 'Distance from Tower'
+        ):
+            selected_sites = []
+            source_name = 'disabled'
+            considered_count = 0
+        else:
+            used_sites = self.grouped_reference_sites(
+                records, include_source_rows=True
+            )
+            if self.reference_sites is None:
+                selected_sites = used_sites
+                source_name = 'record coordinates'
+                considered_count = len(used_sites)
+            else:
+                candidate_sites = self.grouped_reference_sites(
+                    self.reference_sites
+                )
+                source_name = 'cell site list'
+                considered_count = len(candidate_sites)
+                try:
+                    radius_miles = float(self.settings.get(
+                        'reference_site_radius_miles', 25.0
+                    ))
+                except (TypeError, ValueError):
+                    radius_miles = 25.0
+                radius_miles = max(radius_miles, 0.0)
+                selected_sites = [
+                    site for site in candidate_sites
+                    if any(
+                        self.distance_between_points_miles(
+                            used_site['latitude'], used_site['longitude'],
+                            site['latitude'], site['longitude'],
+                        ) <= radius_miles
+                        for used_site in used_sites
+                    )
+                ]
+
+        self._reference_site_cache_key = cache_key
+        self._reference_site_cache = selected_sites
+        self._reference_site_stats = {
+            'reference_site_source': source_name,
+            'reference_sites_considered': considered_count,
+            'reference_sites_generated': len(selected_sites),
+        }
+        return selected_sites
+
+    def create_reference_site_placemark(self, site, position, dataset_name):
+        reference_metadata = self.reference_dataset_metadata(dataset_name)
+        site_ids = site['site_ids']
+        site_ids_text = ', '.join(site_ids) if site_ids else None
+        title = (
+            f"Site {site_ids_text}"
+            if site_ids else f"Reference Site {position + 1}"
+        )
+        coordinate_text = self.source_coord_pair_text(
+            site['latitude'], site['longitude'], site['latitude_text'],
+            site['longitude_text']
+        )
+        csl_source_rows_text = ', '.join(
+            str(row_number) for row_number in site['csl_source_rows']
+        ) or None
+        source_rows_text = ', '.join(
+            str(row_number) for row_number in site['source_rows']
+        ) or None
+        description_rows = []
+        if csl_source_rows_text:
+            description_rows.append((
+                'CSL Row' if len(site['csl_source_rows']) == 1 else 'CSL Rows',
+                csl_source_rows_text,
+            ))
+        elif source_rows_text:
+            description_rows.append((
+                'Source Row' if len(site['source_rows']) == 1 else 'Source Rows',
+                source_rows_text,
+            ))
+        if site_ids_text:
+            description_rows.append(('Site ID', site_ids_text))
+        description_rows.append(('Coordinates', coordinate_text))
+        description = self.build_description_table(description_rows)
+        reference_color = self.settings.get(
+            'reference_site_color', 'ff000000'
+        )
+        values = [
+            *reference_metadata.items(),
+            ('osloc_event_id', f"reference_site_{position + 1:06d}"),
+            ('osloc_event_label', title),
+            ('osloc_event_type', EVENT_TYPES['reference_site']),
+            ('osloc_component_type', COMPONENT_TYPES['reference_site']),
+            ('osloc_site_ids', site_ids_text),
+            ('osloc_csl_source_rows', csl_source_rows_text),
+            ('osloc_source_rows', source_rows_text),
+            ('osloc_source_latitude', site['latitude_text']),
+            ('osloc_source_longitude', site['longitude_text']),
+            ('osloc_source_coordinate_text', coordinate_text),
+            ('osloc_style_reference_color', reference_color),
+            (
+                'osloc_style_reference_color_rgba',
+                self.kml_color_to_css_rgba(reference_color),
+            ),
+        ]
+        extended_data = self.create_data_element_block(values, '            ')
+        return textwrap.dedent(f'''\
+            <Placemark>
+                <name>{xml_escape(title)}</name>
+                <description><![CDATA[{description}]]></description>
+                <Snippet maxLines="0"></Snippet>
+{extended_data}                <styleUrl>{self.style_url('reference-site')}</styleUrl>
+                <Point>
+                    <coordinates>{self.format_source_coord_triplet(site['longitude_text'], site['latitude_text'])}</coordinates>
+                </Point>
+            </Placemark>
+        ''')
+
+    def create_reference_site_folder(self, records, dataset_name):
+        sites = self.reference_sites_for_records(records)
+        if not sites:
+            return ""
+        placemarks = ''.join(
+            self.create_reference_site_placemark(site, position, dataset_name)
+            for position, site in enumerate(sites)
+        )
+        reference_name = self.reference_dataset_metadata(dataset_name)[
+            'osloc_dataset_name'
+        ]
+        return self.wrap_dataset_folder(reference_name, placemarks)
+
+    def reference_site_geojson_features(self, records, dataset_name):
+        fragment = self.create_reference_site_folder(records, dataset_name)
+        return self.geojson_features_from_event_fragment(fragment, {})
 
     def calculate_sector_area_sq_miles(self, radius_miles, sector_width_degrees):
         """Calculate sector area in square miles."""
@@ -722,12 +984,22 @@ class KMLGenerator(QThread):
             'skipped_dst_conflict': len(dst_conflict_rows),
         }
 
+        reference_sites = self.reference_sites_for_records(df)
+        self.audit_summary.update(self._reference_site_stats)
+        if self.settings.get('include_reference_sites', False):
+            self.status_message.emit(
+                f"📊 Reference Sites: generated {len(reference_sites)} static "
+                f"site {'point' if len(reference_sites) == 1 else 'points'} from "
+                f"{self._reference_site_stats['reference_site_source']}"
+            )
+
         body = (
             self.wrap_dataset_folder(dataset_name, placemarks)
             if self.use_flattened_event_output()
             else placemarks
         )
-        return kml_header + body + kml_footer
+        reference_body = self.create_reference_site_folder(df, dataset_name)
+        return kml_header + body + reference_body + kml_footer
     
     def generate_distance_from_tower_kml(self, df):
         """Generate KML for distance from tower data with arc visualization"""
@@ -841,12 +1113,22 @@ class KMLGenerator(QThread):
             'skipped_dst_conflict': len(dst_conflict_rows),
         }
 
+        reference_sites = self.reference_sites_for_records(df)
+        self.audit_summary.update(self._reference_site_stats)
+        if self.settings.get('include_reference_sites', False):
+            self.status_message.emit(
+                f"📊 Reference Sites: generated {len(reference_sites)} static "
+                f"site {'point' if len(reference_sites) == 1 else 'points'} from "
+                f"{self._reference_site_stats['reference_site_source']}"
+            )
+
         body = (
             self.wrap_dataset_folder(dataset_name, placemarks)
             if self.use_flattened_event_output()
             else placemarks
         )
-        return kml_header + body + kml_footer
+        reference_body = self.create_reference_site_folder(df, dataset_name)
+        return kml_header + body + reference_body + kml_footer
     
     def generate_gps_kml(self, df):
         """Generate KML for location point data"""
@@ -1881,6 +2163,7 @@ class KMLGenerator(QThread):
             except TimestampResolutionError:
                 continue
 
+        features.extend(self.reference_site_geojson_features(df, dataset_name))
         return self.create_geojson_collection(dataset_name, features)
 
     def generate_distance_from_tower_geojson(self, df):
@@ -1953,6 +2236,7 @@ class KMLGenerator(QThread):
             except TimestampResolutionError:
                 continue
 
+        features.extend(self.reference_site_geojson_features(df, dataset_name))
         return self.create_geojson_collection(dataset_name, features)
 
     def generate_gps_geojson(self, df):

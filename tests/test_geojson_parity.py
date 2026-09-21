@@ -104,6 +104,187 @@ def geojson_primitive_counts_by_event(geojson_text):
 
 
 class GeoJSONParityTests(unittest.TestCase):
+    def test_csl_reference_sites_are_static_deduplicated_and_radius_filtered(self):
+        records = pd.DataFrame([{
+            'Timestamp': '2024-01-15T14:00:00Z',
+            'Latitude': 43.0,
+            'Longitude': -77.0,
+            'Azimuth': 90,
+        }])
+        cell_sites = pd.DataFrame([
+            {'Site ID': 'USED', 'Latitude': 43.0, 'Longitude': -77.0,
+             'CSL Source Rows': (2,)},
+            {'Site ID': 'USED', 'Latitude': '43.000', 'Longitude': '-77.000',
+             'CSL Source Rows': (3,)},
+            {'Site ID': 'NEARBY', 'Latitude': 43.1, 'Longitude': -77.0,
+             'CSL Source Rows': (4,)},
+            {'Site ID': 'DISTANT', 'Latitude': 43.5, 'Longitude': -77.0,
+             'CSL Source Rows': (5,)},
+        ])
+        settings = generator_settings()
+        settings.update({
+            'include_reference_sites': True,
+            'reference_site_radius_miles': 25.0,
+            'reference_site_color': 'ff000000',
+        })
+        generator = KMLGenerator(
+            '', 'Tower/Sector', settings, reference_sites=cell_sites
+        )
+
+        kml_root = ET.fromstring(generator.generate_cell_tower_kml(records))
+        geojson_payload = json.loads(
+            generator.generate_cell_tower_geojson(records)
+        )
+
+        folders = kml_root.findall('kml:Document/kml:Folder', KML_NAMESPACE)
+        self.assertEqual(2, len(folders))
+        reference_folder = folders[1]
+        self.assertEqual(
+            'Tower/Sector Data - Reference Sites',
+            reference_folder.findtext('kml:name', namespaces=KML_NAMESPACE),
+        )
+        reference_placemarks = reference_folder.findall(
+            'kml:Placemark', KML_NAMESPACE
+        )
+        self.assertEqual(2, len(reference_placemarks))
+        self.assertTrue(all(
+            placemark.find('kml:TimeSpan', KML_NAMESPACE) is None
+            for placemark in reference_placemarks
+        ))
+
+        reference_metadata = [
+            parse_kml_extended_data(placemark)
+            for placemark in reference_placemarks
+        ]
+        reference_dataset_ids = {
+            metadata['osloc_dataset_id'] for metadata in reference_metadata
+        }
+        primary_dataset_id = parse_kml_extended_data(
+            kml_root.find('kml:Document', KML_NAMESPACE)
+        )['osloc_dataset_id']
+        self.assertEqual(1, len(reference_dataset_ids))
+        self.assertNotIn(primary_dataset_id, reference_dataset_ids)
+        self.assertEqual(
+            {'reference_site'},
+            {metadata['osloc_event_type'] for metadata in reference_metadata},
+        )
+        metadata_by_site = {
+            metadata['osloc_site_ids']: metadata
+            for metadata in reference_metadata
+        }
+        self.assertEqual('2, 3', metadata_by_site['USED']['osloc_csl_source_rows'])
+        self.assertEqual('4', metadata_by_site['NEARBY']['osloc_csl_source_rows'])
+        reference_style = next(
+            style for style in kml_root.findall(
+                'kml:Document/kml:Style', KML_NAMESPACE
+            )
+            if style.get('id') == 'osloc-reference-site'
+        )
+        self.assertEqual(
+            'ff000000',
+            reference_style.findtext(
+                'kml:IconStyle/kml:color', namespaces=KML_NAMESPACE
+            ),
+        )
+
+        reference_features = [
+            feature for feature in geojson_payload['features']
+            if feature['properties'].get('osloc_event_type') == 'reference_site'
+        ]
+        self.assertEqual(2, len(reference_features))
+        self.assertEqual(
+            reference_dataset_ids,
+            {
+                feature['properties']['osloc_dataset_id']
+                for feature in reference_features
+            },
+        )
+        self.assertEqual(
+            {'USED', 'NEARBY'},
+            {
+                feature['properties']['osloc_site_ids']
+                for feature in reference_features
+            },
+        )
+        self.assertTrue(all(
+            'osloc_start_epoch_ms' not in feature['properties']
+            for feature in reference_features
+        ))
+        self.assertTrue(all(
+            feature['properties']['osloc_style_reference_color_rgba']
+            == 'rgba(0, 0, 0, 1)'
+            for feature in reference_features
+        ))
+        self.assertEqual(
+            {'USED': '2, 3', 'NEARBY': '4'},
+            {
+                feature['properties']['osloc_site_ids']:
+                    feature['properties']['osloc_csl_source_rows']
+                for feature in reference_features
+            },
+        )
+
+    def test_reference_sites_without_csl_use_unique_record_coordinates(self):
+        records = pd.DataFrame([
+            {
+                'Timestamp': '2024-01-15T14:00:00Z',
+                'Latitude': '43.1000',
+                'Longitude': '-77.1000',
+                'Azimuth': 90,
+            },
+            {
+                'Timestamp': '2024-01-15T14:05:00Z',
+                'Latitude': 43.1,
+                'Longitude': -77.1,
+                'Azimuth': 180,
+            },
+            {
+                'Timestamp': '2024-01-15T14:10:00Z',
+                'Latitude': 43.2,
+                'Longitude': -77.2,
+                'Azimuth': 270,
+            },
+        ])
+        settings = generator_settings()
+        settings['include_reference_sites'] = True
+        generator = KMLGenerator('', 'Tower/Sector', settings)
+
+        kml_root = ET.fromstring(generator.generate_cell_tower_kml(records))
+        geojson_payload = json.loads(
+            generator.generate_cell_tower_geojson(records)
+        )
+
+        folders = kml_root.findall('kml:Document/kml:Folder', KML_NAMESPACE)
+        self.assertEqual(2, len(folders))
+        self.assertEqual(
+            2,
+            len(folders[1].findall('kml:Placemark', KML_NAMESPACE)),
+        )
+        self.assertEqual(
+            2,
+            sum(
+                feature['properties'].get('osloc_event_type')
+                == 'reference_site'
+                for feature in geojson_payload['features']
+            ),
+        )
+        reference_features = [
+            feature for feature in geojson_payload['features']
+            if feature['properties'].get('osloc_event_type') == 'reference_site'
+        ]
+        self.assertEqual(
+            {'2, 3', '4'},
+            {
+                feature['properties']['osloc_source_rows']
+                for feature in reference_features
+            },
+        )
+        self.assertTrue(all(
+            'osloc_site_ids' not in feature['properties']
+            and 'Not available' not in feature['properties']['description']
+            for feature in reference_features
+        ))
+
     def test_geojson_preserves_source_coordinate_precision_text(self):
         dataframe = pd.DataFrame([{
             'Timestamp': '2024-01-15T14:00:00Z',
