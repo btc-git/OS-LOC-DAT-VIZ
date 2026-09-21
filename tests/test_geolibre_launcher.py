@@ -492,6 +492,34 @@ class GenerationActionTests(unittest.TestCase):
         self.assertTrue(window.marker_drop_widget.property("compact"))
         self.assertIsInstance(window.marker_drop_widget.layout(), QHBoxLayout)
         self.assertLessEqual(window.marker_drop_widget.maximumHeight(), 62)
+        self.assertEqual("— OR —", window.marker_drop_widget.or_label.text())
+        self.assertEqual(
+            "Import a list above or add markers individually below.",
+            window.marker_entry_hint.text(),
+        )
+
+        window.resize(768, 1057)
+        window.show()
+        self.app.processEvents()
+        table_width = window.marker_table.viewport().width()
+        self.assertLessEqual(window.marker_table.columnWidth(0), table_width * 0.43)
+        self.assertLessEqual(
+            abs(
+                window.marker_table.columnWidth(1)
+                - window.marker_table.columnWidth(2)
+            ),
+            1,
+        )
+        for column, header_text in ((1, "Latitude"), (2, "Longitude")):
+            required_width = (
+                window.marker_table.fontMetrics().horizontalAdvance(header_text)
+                + 24
+            )
+            self.assertGreaterEqual(
+                window.marker_table.columnWidth(column), required_width
+            )
+        self.assertEqual(92, window.marker_table.columnWidth(3))
+        self.assertEqual(40, window.marker_table.columnWidth(4))
 
         window.add_marker_row()
         window.marker_table.item(0, 0).setText("Court")
@@ -535,6 +563,25 @@ class GenerationActionTests(unittest.TestCase):
             self.assertEqual("Office", window.marker_table.item(1, 0).text())
             self.assertEqual([str(marker_path)], window.marker_import_files)
             self.assertIn("Marker list Row 3", window.status_text.toPlainText())
+
+    def test_compact_marker_drop_emits_spreadsheet_path(self):
+        with patch.object(MainWindow, "show_disclaimer_dialog"):
+            window = MainWindow()
+        self.addCleanup(window.close)
+        dropped_paths = []
+        window.marker_drop_widget.file_dropped.disconnect()
+        window.marker_drop_widget.file_dropped.connect(dropped_paths.append)
+        url = Mock()
+        url.isLocalFile.return_value = True
+        url.toLocalFile.return_value = "markers.xlsx"
+        event = Mock()
+        event.mimeData.return_value.hasUrls.return_value = True
+        event.mimeData.return_value.urls.return_value = [url]
+
+        window.marker_drop_widget.dropEvent(event)
+
+        self.assertEqual(["markers.xlsx"], dropped_paths)
+        event.acceptProposedAction.assert_called_once_with()
 
     def test_markers_template_has_coordinate_and_color_columns(self):
         with tempfile.TemporaryDirectory() as temporary_directory:

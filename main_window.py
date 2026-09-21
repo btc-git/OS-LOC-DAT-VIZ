@@ -33,7 +33,7 @@ from import_wizard import (
     fixed_offset_label,
     timezone_choice_data,
 )
-from widgets import DragDropWidget
+from widgets import DragDropWidget, MarkerTableWidget
 from kml_generator import KMLGenerator
 from version import APP_VERSION
 
@@ -576,7 +576,7 @@ class MainWindow(QMainWindow):
         self.gps_color_button.clicked.connect(lambda: self.select_color("gps"))
         color_layout.addWidget(self.gps_color_button, 3, 1)
 
-        color_layout.addWidget(QLabel("Reference Site Dots:"), 4, 0)
+        color_layout.addWidget(QLabel("Reference Cell Site Dots:"), 4, 0)
         self.reference_site_color_button = QPushButton()
         self.reference_site_color = "ff000000"  # Black
         self.reference_site_color_button.setStyleSheet(
@@ -609,15 +609,22 @@ class MainWindow(QMainWindow):
         self.add_marker_button.clicked.connect(self.add_marker_row)
         self.clear_markers_button = QPushButton("Clear All")
         self.clear_markers_button.clicked.connect(self.clear_marker_rows)
+        self.marker_entry_hint = QLabel(
+            "Import a list above or add markers individually below."
+        )
+        self.marker_entry_hint.setStyleSheet(
+            "color: #aaaaaa; font-size: 11px;"
+        )
         self.marker_count_label = QLabel("0 markers")
         self.marker_count_label.setStyleSheet("color: #aaaaaa;")
         marker_actions.addWidget(self.add_marker_button)
         marker_actions.addWidget(self.clear_markers_button)
+        marker_actions.addWidget(self.marker_entry_hint)
         marker_actions.addStretch()
         marker_actions.addWidget(self.marker_count_label)
         marker_layout.addLayout(marker_actions)
 
-        self.marker_table = QTableWidget(0, 5)
+        self.marker_table = MarkerTableWidget(0, 5)
         self.marker_table.setHorizontalHeaderLabels([
             "Label", "Latitude", "Longitude", "Color", "",
         ])
@@ -627,13 +634,11 @@ class MainWindow(QMainWindow):
             QTableWidget.SelectionBehavior.SelectRows
         )
         marker_header = self.marker_table.horizontalHeader()
-        marker_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        for column in (1, 2, 3):
+        for column in range(5):
             marker_header.setSectionResizeMode(
-                column, QHeaderView.ResizeMode.ResizeToContents
+                column, QHeaderView.ResizeMode.Fixed
             )
-        marker_header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
-        self.marker_table.setColumnWidth(4, 36)
+        self.marker_table.resize_marker_columns()
         marker_layout.addWidget(self.marker_table, 1)
 
         tab_widget.addTab(marker_tab, "Markers")
