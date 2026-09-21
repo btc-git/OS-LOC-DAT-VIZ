@@ -75,7 +75,7 @@ class DisclaimerDialog(QDialog):
     <li>Drag and drop a CSV or Excel file into the program, or use the <strong>Browse for File</strong> button. Standard template files are recognized automatically.</li>
     <li>If the headers do not match a standard template, the mapping wizard opens automatically. Select the worksheet and header row, choose the record type, and verify each suggested column mapping.</li>
     <li>Review the timezone, slash/dash date order, units, visualization settings, and optional label. Add or import coordinate-only context markers on the <strong>Markers</strong> tab when needed.</li>
-    <li>Click <strong>Generate</strong> to create same-named KML, GeoJSON, and TXT generation-log files.</li>
+    <li>Click <strong>Process</strong> to create same-named KML, GeoJSON, and TXT generation-log files.</li>
     <li>Review the log’s settings, hashes, row outcomes, and warnings before opening the KML in Google Earth Pro or using the GeoJSON in another compatible GIS application.</li>
 </ol>
 

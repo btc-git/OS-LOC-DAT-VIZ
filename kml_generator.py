@@ -24,6 +24,10 @@ class TimestampResolutionError(Exception):
 
 
 OSLOC_SCHEMA_VERSION = "1"
+PRELIMINARY_REVIEW_NOTICE = (
+    "Preliminary visualization only. All data, assumptions, conversions, "
+    "and generated geometry require independent expert verification."
+)
 
 EVENT_TYPES = {
     'tower_sector': 'tower_sector',
@@ -167,7 +171,11 @@ class KMLGenerator(QThread):
         """Create export-level metadata for the KML Document."""
         if not self.export_metadata:
             return ""
-        return self.create_data_element_block(self.export_metadata.items(), indent)
+        values = [
+            *self.export_metadata.items(),
+            ('osloc_review_notice', PRELIMINARY_REVIEW_NOTICE),
+        ]
+        return self.create_data_element_block(values, indent)
 
     def create_kml_header(self, dataset_name):
         """Start one export and create its KML Document header."""
@@ -177,6 +185,7 @@ class KMLGenerator(QThread):
             '<kml xmlns="http://www.opengis.net/kml/2.2">\n'
             '<Document>\n'
             f'    <name>{xml_escape(dataset_name)}</name>\n'
+            f'    <description>{xml_escape(PRELIMINARY_REVIEW_NOTICE)}</description>\n'
             + self.create_document_extended_data("    ")
             + self.create_shared_styles("    ")
         )
@@ -1032,6 +1041,7 @@ class KMLGenerator(QThread):
         missing_azimuth_count = 0
         invalid_coordinate_count = 0
         dst_conflict_rows = []
+        untimed_timestamp_rows = []
         generated_count = 0
         
         for idx, (_, row) in enumerate(df.iterrows()):
@@ -1052,7 +1062,8 @@ class KMLGenerator(QThread):
             lat, lon, lat_source_text, lon_source_text = coordinates
             
             # Use timestamp if available, otherwise use a generic label
-            if pd.isna(timestamp):
+            timestamp_missing = self.is_missing_timestamp(timestamp)
+            if timestamp_missing:
                 timestamp = f"Entry {idx + 1}"
             
             # Generate sector or circle based on azimuth availability
@@ -1074,6 +1085,8 @@ class KMLGenerator(QThread):
                     placemarks += self.maybe_flatten_event_fragment(self.create_circle_placemark(
                         lat, lon, event_metadata, lat_source_text, lon_source_text
                     ))
+                if timestamp_missing or event_metadata['timestamp_parse_failed']:
+                    untimed_timestamp_rows.append(event_metadata['source_row'])
                 generated_count += 1
             except TimestampResolutionError:
                 dst_conflict_rows.append(idx + 1)
@@ -1083,6 +1096,9 @@ class KMLGenerator(QThread):
             self.status_message.emit(f"⚠️ Tower/Sector Data: {missing_azimuth_count} points had no azimuth data - used 360° visualization circles")
         if invalid_coordinate_count > 0:
             self.status_message.emit(f"⚠️ Tower/Sector Data: {invalid_coordinate_count} rows were skipped because latitude or longitude was missing or invalid")
+        self.report_untimed_timestamps(
+            "Tower/Sector Data", untimed_timestamp_rows
+        )
         self.report_dst_conflicts("Tower/Sector Data", dst_conflict_rows)
         self.audit_summary = {
             'input_rows': total_rows,
@@ -1090,6 +1106,7 @@ class KMLGenerator(QThread):
             'skipped_invalid_coordinates': invalid_coordinate_count,
             'skipped_missing_timestamp': 0,
             'skipped_dst_conflict': len(dst_conflict_rows),
+            'generated_without_timeline': len(untimed_timestamp_rows),
         }
 
         reference_sites = self.reference_sites_for_records(df)
@@ -1128,6 +1145,7 @@ class KMLGenerator(QThread):
         missing_distance_count = 0
         invalid_coordinate_count = 0
         dst_conflict_rows = []
+        untimed_timestamp_rows = []
         generated_count = 0
         
         for idx, (_, row) in enumerate(df.iterrows()):
@@ -1151,7 +1169,8 @@ class KMLGenerator(QThread):
             lat, lon, lat_source_text, lon_source_text = coordinates
             
             # Use timestamp if available, otherwise use a generic label
-            if pd.isna(timestamp):
+            timestamp_missing = self.is_missing_timestamp(timestamp)
+            if timestamp_missing:
                 timestamp = f"Entry {idx + 1}"
             
             # Determine visualization based on available data
@@ -1203,6 +1222,8 @@ class KMLGenerator(QThread):
                     placemarks += self.maybe_flatten_event_fragment(self.create_circle_placemark(
                         lat, lon, event_metadata, lat_source_text, lon_source_text
                     ))
+                if timestamp_missing or event_metadata['timestamp_parse_failed']:
+                    untimed_timestamp_rows.append(event_metadata['source_row'])
                 generated_count += 1
             except TimestampResolutionError:
                 dst_conflict_rows.append(idx + 1)
@@ -1214,6 +1235,9 @@ class KMLGenerator(QThread):
             self.status_message.emit(f"⚠️ Distance from Tower Data: {missing_distance_count} points had no distance data - distance from tower not drawn")
         if invalid_coordinate_count > 0:
             self.status_message.emit(f"⚠️ Distance from Tower Data: {invalid_coordinate_count} rows were skipped because latitude or longitude was missing or invalid")
+        self.report_untimed_timestamps(
+            "Distance from Tower Data", untimed_timestamp_rows
+        )
         self.report_dst_conflicts("Distance from Tower Data", dst_conflict_rows)
         self.audit_summary = {
             'input_rows': total_rows,
@@ -1221,6 +1245,7 @@ class KMLGenerator(QThread):
             'skipped_invalid_coordinates': invalid_coordinate_count,
             'skipped_missing_timestamp': 0,
             'skipped_dst_conflict': len(dst_conflict_rows),
+            'generated_without_timeline': len(untimed_timestamp_rows),
         }
 
         reference_sites = self.reference_sites_for_records(df)
@@ -1260,6 +1285,7 @@ class KMLGenerator(QThread):
         invalid_coordinate_count = 0
         missing_timestamp_count = 0
         dst_conflict_rows = []
+        untimed_timestamp_rows = []
         generated_count = 0
         
         for idx, (_, row) in enumerate(df.iterrows()):
@@ -1274,7 +1300,7 @@ class KMLGenerator(QThread):
             if coordinates is None:
                 invalid_coordinate_count += 1
                 continue
-            if pd.isna(timestamp):
+            if self.is_missing_timestamp(timestamp):
                 missing_timestamp_count += 1
                 continue
             lat, lon, lat_source_text, lon_source_text = coordinates
@@ -1311,6 +1337,8 @@ class KMLGenerator(QThread):
                     lat, lon, radius_miles, event_metadata, lat_source_text,
                     lon_source_text, accuracy_display
                 ))
+                if event_metadata['timestamp_parse_failed']:
+                    untimed_timestamp_rows.append(event_metadata['source_row'])
                 generated_count += 1
             except TimestampResolutionError:
                 dst_conflict_rows.append(idx + 1)
@@ -1326,6 +1354,9 @@ class KMLGenerator(QThread):
             self.status_message.emit(f"⚠️ Location Point Data: {invalid_coordinate_count} rows were skipped because latitude or longitude was missing or invalid")
         if missing_timestamp_count > 0:
             self.status_message.emit(f"⚠️ Location Point Data: {missing_timestamp_count} rows were skipped because the timestamp was missing")
+        self.report_untimed_timestamps(
+            "Location Point Data", untimed_timestamp_rows
+        )
         self.report_dst_conflicts("Location Point Data", dst_conflict_rows)
         self.audit_summary = {
             'input_rows': total_rows,
@@ -1333,6 +1364,7 @@ class KMLGenerator(QThread):
             'skipped_invalid_coordinates': invalid_coordinate_count,
             'skipped_missing_timestamp': missing_timestamp_count,
             'skipped_dst_conflict': len(dst_conflict_rows),
+            'generated_without_timeline': len(untimed_timestamp_rows),
         }
 
         body = (
@@ -1508,6 +1540,18 @@ class KMLGenerator(QThread):
             f"⚠️ {data_type}: {len(row_numbers)} rows were omitted because their local times were ambiguous or nonexistent during a daylight-saving transition (data rows: {rows}{suffix}). Use an explicit UTC offset to resolve them."
         )
 
+    def report_untimed_timestamps(self, data_type, row_numbers):
+        """Report valid geometry exported without resolvable timestamp data."""
+        if not row_numbers:
+            return
+        rows = ", ".join(str(row_number) for row_number in row_numbers[:10])
+        suffix = "..." if len(row_numbers) > 10 else ""
+        self.status_message.emit(
+            f"⚠️ {data_type}: {len(row_numbers)} rows had missing or "
+            "unparseable timestamps and were exported without timeline metadata "
+            f"(source rows: {rows}{suffix})."
+        )
+
     def normalize_column_name(self, column_name):
         """Normalize punctuation and spacing for case-insensitive column matching."""
         return re.sub(r'[^a-z0-9]+', ' ', str(column_name).lower()).strip()
@@ -1556,6 +1600,18 @@ class KMLGenerator(QThread):
             time_text += ' UTC'
 
         return f"{date_text} {time_text}"
+
+    @staticmethod
+    def is_missing_timestamp(value):
+        """Return whether a timestamp value is absent rather than malformed."""
+        if value is None:
+            return True
+        try:
+            if pd.isna(value):
+                return True
+        except (TypeError, ValueError):
+            pass
+        return str(value).strip().lower() in ('', 'none', 'nan', 'nat')
     
     def parse_timestamp_to_kml(self, timestamp_str):
         """Parse a timestamp and return the established UTC/display pair."""
@@ -1564,9 +1620,8 @@ class KMLGenerator(QThread):
 
     def parse_timestamp_details(self, timestamp_str):
         """Parse once and retain the timezone used to resolve the source time."""
-        if pd.isna(timestamp_str) or not timestamp_str or str(timestamp_str).strip() == '' or str(timestamp_str).lower() == 'none':
-            display_label = str(timestamp_str) if timestamp_str and str(timestamp_str).lower() != 'none' else "Unknown"
-            return None, display_label, None, None
+        if self.is_missing_timestamp(timestamp_str):
+            return None, "Unknown", None, None
         
         timestamp_str = str(timestamp_str).strip()
         source_offset_minutes = int(self.settings.get('source_utc_offset_minutes', 0))
@@ -1599,6 +1654,16 @@ class KMLGenerator(QThread):
         
         # Strip milliseconds and microseconds (e.g., "2025-02-11 11:06:07.557" -> "2025-02-11 11:06:07")
         timestamp_str_clean = re.sub(r'(\d{2}):(\d{2}):(\d{2})\.\d+', r'\1:\2:\3', timestamp_str_clean)
+
+        meridiem = None
+        meridiem_match = re.search(
+            r'\s+([APap][Mm])\s*$', timestamp_str_clean
+        )
+        if meridiem_match and ':' in timestamp_str_clean:
+            meridiem = meridiem_match.group(1).lower()
+            timestamp_str_clean = timestamp_str_clean[
+                :meridiem_match.start()
+            ].strip()
         
         # Common timestamp patterns
         patterns = [
@@ -1635,7 +1700,7 @@ class KMLGenerator(QThread):
         ]
         
         for pattern in patterns:
-            match = re.search(pattern, timestamp_str_clean)
+            match = re.fullmatch(pattern, timestamp_str_clean)
             if match:
                 groups = match.groups()
                 
@@ -1649,10 +1714,10 @@ class KMLGenerator(QThread):
                         
                         # Handle AM/PM
                         is_time_only = True
-                        if len(groups) > 2 and groups[-1] and groups[-1].lower() in ['pm', 'am']:
-                            if groups[-1].lower() == 'pm' and hour != 12:
+                        if meridiem:
+                            if meridiem == 'pm' and hour != 12:
                                 hour += 12
-                            elif groups[-1].lower() == 'am' and hour == 12:
+                            elif meridiem == 'am' and hour == 12:
                                 hour = 0
                         
                         # Use today's date for time-only entries
@@ -1711,12 +1776,10 @@ class KMLGenerator(QThread):
                         second = int(groups[5]) if len(groups) > 5 else 0
                         
                         # Handle AM/PM (check if there's an AM/PM marker in the original string)
-                        ampm_match = re.search(r'\s([APap][Mm])\s*$', timestamp_str_clean)
-                        if ampm_match:
-                            ampm = ampm_match.group(1).lower()
-                            if ampm == 'pm' and hour != 12:
+                        if meridiem:
+                            if meridiem == 'pm' and hour != 12:
                                 hour += 12
-                            elif ampm == 'am' and hour == 12:
+                            elif meridiem == 'am' and hour == 12:
                                 hour = 0
                         
                         # Create datetime object
@@ -1726,7 +1789,7 @@ class KMLGenerator(QThread):
                     # Create display label - show only time for time-only entries
                     if is_time_only:
                         # For time-only entries, show just the time in a clean format
-                        if len(groups) > 3 and groups[-1] and groups[-1].lower() in ['pm', 'am']:
+                        if meridiem:
                             # Keep AM/PM format if it was in the original
                             display_label = dt.strftime('%I:%M:%S %p').lstrip('0')
                         else:
@@ -1887,6 +1950,10 @@ class KMLGenerator(QThread):
         kml_timestamp, display_label, source_timezone, timezone_description = (
             self.parse_timestamp_details(timestamp)
         )
+        timestamp_parse_failed = (
+            kml_timestamp is None
+            and not self.is_missing_timestamp(timestamp)
+        )
         time_range = self.create_time_range(kml_timestamp)
         display_timezone, display_timezone_description = self.resolve_display_timezone(
             source_timezone, timezone_description
@@ -1901,6 +1968,7 @@ class KMLGenerator(QThread):
             'title': event_title,
             'event_type': event_type,
             'display_label': display_label,
+            'timestamp_parse_failed': bool(timestamp_parse_failed),
             'time_range': time_range,
             'local_time_range': local_time_range,
             'timezone': display_timezone_description,
@@ -2198,6 +2266,7 @@ class KMLGenerator(QThread):
             'osloc_schema_version': metadata['osloc_schema_version'],
             'osloc_dataset_id': metadata['osloc_dataset_id'],
             'osloc_dataset_name': metadata['osloc_dataset_name'],
+            'osloc_review_notice': PRELIMINARY_REVIEW_NOTICE,
         }, indent=2)
 
     def source_geojson_properties(self, lat_source_text, lon_source_text):
@@ -2251,7 +2320,7 @@ class KMLGenerator(QThread):
             if coordinates is None:
                 continue
             lat, lon, lat_source_text, lon_source_text = coordinates
-            if pd.isna(timestamp):
+            if self.is_missing_timestamp(timestamp):
                 timestamp = f"Entry {idx + 1}"
 
             try:
@@ -2299,7 +2368,7 @@ class KMLGenerator(QThread):
             if coordinates is None:
                 continue
             lat, lon, lat_source_text, lon_source_text = coordinates
-            if pd.isna(timestamp):
+            if self.is_missing_timestamp(timestamp):
                 timestamp = f"Entry {idx + 1}"
 
             has_azimuth = azimuth is not None
@@ -2366,7 +2435,7 @@ class KMLGenerator(QThread):
                 row, ['GPS Accuracy', 'Accuracy', 'gps_accuracy', 'accuracy']
             )
 
-            if coordinates is None or pd.isna(timestamp):
+            if coordinates is None or self.is_missing_timestamp(timestamp):
                 continue
             lat, lon, lat_source_text, lon_source_text = coordinates
 
@@ -2594,8 +2663,8 @@ class KMLGenerator(QThread):
         )
         circle_description = self.build_description_table([
             ('Tower', source_pair),
-            ('Coverage Radius', f"{self.settings['shaded_area_length']} miles"),
-            ('Reason', 'Azimuth not available; using 360° coverage circle'),
+            ('Visualization Radius', f"{self.settings['shaded_area_length']} miles"),
+            ('Reason', 'Azimuth not available; using 360° visualization circle'),
         ], event_metadata['source_row'])
         
         # Create folder to group circle and center label

@@ -104,6 +104,102 @@ def geojson_primitive_counts_by_event(geojson_text):
 
 
 class GeoJSONParityTests(unittest.TestCase):
+    def test_outputs_include_preliminary_review_notice(self):
+        records = pd.DataFrame([{
+            'Timestamp': '2024-01-15T14:00:00Z',
+            'Latitude': 43.15,
+            'Longitude': -77.61,
+            'Azimuth': 240,
+        }])
+        generator = KMLGenerator('', 'Tower/Sector', generator_settings())
+
+        kml_root = ET.fromstring(generator.generate_cell_tower_kml(records))
+        geojson_payload = json.loads(
+            generator.generate_cell_tower_geojson(records)
+        )
+        document = kml_root.find('kml:Document', KML_NAMESPACE)
+        document_values = parse_kml_extended_data(document)
+
+        self.assertIn(
+            'Preliminary visualization only',
+            document.findtext('kml:description', namespaces=KML_NAMESPACE),
+        )
+        self.assertEqual(
+            document_values['osloc_review_notice'],
+            geojson_payload['osloc_review_notice'],
+        )
+        self.assertIn(
+            'independent expert verification',
+            geojson_payload['osloc_review_notice'],
+        )
+
+    def test_untimed_timestamp_outcomes_match_between_output_formats(self):
+        cases = (
+            (
+                'Tower/Sector',
+                'generate_cell_tower_kml',
+                'generate_cell_tower_geojson',
+                {'Azimuth': 240},
+                4,
+            ),
+            (
+                'Distance from Tower',
+                'generate_distance_from_tower_kml',
+                'generate_distance_from_tower_geojson',
+                {'Azimuth': 240, 'Distance': 2.0},
+                4,
+            ),
+            (
+                'Location Point',
+                'generate_gps_kml',
+                'generate_gps_geojson',
+                {'Accuracy': 100},
+                3,
+            ),
+        )
+
+        for data_type, kml_method, geojson_method, fields, event_count in cases:
+            with self.subTest(data_type=data_type):
+                records = pd.DataFrame([
+                    {
+                        'Timestamp': '   ',
+                        'Latitude': 43.15,
+                        'Longitude': -77.61,
+                        **fields,
+                    },
+                    {
+                        'Timestamp': 'not a timestamp',
+                        'Latitude': 43.16,
+                        'Longitude': -77.62,
+                        **fields,
+                    },
+                    {
+                        'Timestamp': '2024-01-15T14:00:00+25:00',
+                        'Latitude': 43.17,
+                        'Longitude': -77.63,
+                        **fields,
+                    },
+                    {
+                        'Timestamp': '2024-01-15T14:00:00 trailing text',
+                        'Latitude': 43.18,
+                        'Longitude': -77.64,
+                        **fields,
+                    },
+                ])
+                generator = KMLGenerator('', data_type, generator_settings())
+
+                kml_text = getattr(generator, kml_method)(records)
+                geojson_text = getattr(generator, geojson_method)(records)
+                kml_counts = kml_primitive_counts_by_event(kml_text)
+                geojson_counts = geojson_primitive_counts_by_event(geojson_text)
+
+                self.assertEqual(event_count, len(kml_counts))
+                self.assertEqual(kml_counts, geojson_counts)
+                self.assertTrue(all(
+                    'osloc_start_time' not in feature['properties']
+                    for feature in json.loads(geojson_text)['features']
+                ))
+
     def test_markers_are_exported_for_every_primary_record_type(self):
         marker = {
             'label': 'Reference Point',

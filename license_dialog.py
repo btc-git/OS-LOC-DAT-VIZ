@@ -23,7 +23,8 @@ class LicenseDialog(QDialog):
             "OS-LOC-DAT-VIZ is licensed under GNU GPL v3.0. This distribution "
             "also packages the unmodified GeoLibre Desktop 3.0.0 application "
             "for viewer functionality; GeoLibre is separately licensed under "
-            "the MIT License. Complete license texts follow."
+            "the MIT License. The project license, dependency inventory, and "
+            "license files included in this build follow."
         )
         notice_label.setWordWrap(True)
         notice_label.setStyleSheet("color: #cccccc; padding: 4px 2px 8px 2px;")
@@ -80,13 +81,16 @@ class LicenseDialog(QDialog):
         layout.addLayout(button_layout)
 
     @staticmethod
-    def _read_resource(relative_path):
-        roots = [
+    def _resource_roots():
+        return [
             Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent)),
             Path(__file__).resolve().parent,
             Path(__file__).resolve().parent.parent,
         ]
-        for root in roots:
+
+    @classmethod
+    def _read_resource(cls, relative_path):
+        for root in cls._resource_roots():
             path = root / relative_path
             if path.is_file():
                 try:
@@ -95,17 +99,51 @@ class LicenseDialog(QDialog):
                     continue
         return f"License file not found: {relative_path}"
 
+    @classmethod
+    def _read_resource_directory(cls, relative_path):
+        for root in cls._resource_roots():
+            directory = root / relative_path
+            if not directory.is_dir():
+                continue
+            sections = []
+            for path in sorted(
+                candidate for candidate in directory.rglob('*')
+                if candidate.is_file()
+            ):
+                try:
+                    text = path.read_text(encoding='utf-8', errors='replace')
+                except OSError:
+                    continue
+                sections.append(
+                    f"--- {path.relative_to(directory).as_posix()} ---\n\n"
+                    f"{text.rstrip()}"
+                )
+            if sections:
+                return "\n\n".join(sections)
+        return ""
+
     def _read_license(self):
         project_license = self._read_resource("LICENSE")
+        third_party_notices = self._read_resource("THIRD_PARTY_NOTICES.md")
         geolibre_license = self._read_resource(
             Path("GeoLibre-Viewer") / "LICENSE-GeoLibre.txt"
         )
+        packaged_dependency_licenses = self._read_resource_directory(
+            "Third-Party-Licenses"
+        )
         separator = "=" * 72
-        return (
+        sections = [
             "OS-LOC-DAT-VIZ - GNU GPL v3.0\n"
             "https://github.com/btc-git/OS-LOC-DAT-VIZ\n\n"
-            f"{project_license.rstrip()}\n\n"
-            f"{separator}\n\n"
+            f"{project_license.rstrip()}",
+            "THIRD-PARTY DEPENDENCY INVENTORY\n\n"
+            f"{third_party_notices.rstrip()}",
             "BUNDLED THIRD-PARTY SOFTWARE\n\n"
-            f"{geolibre_license.rstrip()}\n"
-        )
+            f"{geolibre_license.rstrip()}",
+        ]
+        if packaged_dependency_licenses:
+            sections.append(
+                "PACKAGED DEPENDENCY LICENSE FILES\n\n"
+                f"{packaged_dependency_licenses}"
+            )
+        return f"\n\n{separator}\n\n".join(sections) + "\n"

@@ -104,7 +104,10 @@ class KMLTemporalMetadataTests(unittest.TestCase):
             'point': len(root.findall('.//kml:Point', KML_NAMESPACE)),
         }
 
-    def assert_identity_only_placemark(self, placemark, expected_event_type):
+    def assert_identity_only_placemark(
+        self, placemark, expected_event_type,
+        expected_event_id='event_000001', expected_source_row='2'
+    ):
         metadata = extended_data(placemark)
         self.assertIsNone(placemark.find('kml:TimeSpan', KML_NAMESPACE))
         allowed_keys = {
@@ -123,8 +126,8 @@ class KMLTemporalMetadataTests(unittest.TestCase):
                  'osloc_component_type'}.issubset(set(metadata)))
         self.assertEqual('1', metadata['osloc_schema_version'])
         UUID(metadata['osloc_dataset_id'])
-        self.assertEqual('event_000001', metadata['osloc_event_id'])
-        self.assertEqual('2', metadata['osloc_source_row'])
+        self.assertEqual(expected_event_id, metadata['osloc_event_id'])
+        self.assertEqual(expected_source_row, metadata['osloc_source_row'])
         self.assertEqual(expected_event_type, metadata['osloc_event_type'])
         if 'osloc_event_label' in metadata:
             self.assertTrue(metadata['osloc_event_label'])
@@ -685,23 +688,128 @@ class KMLTemporalMetadataTests(unittest.TestCase):
         )
 
     def test_invalid_timestamp_output_has_identity_only_metadata(self):
-        dataframe = pd.DataFrame([{
-            'Timestamp': 'not a timestamp',
-            'Latitude': 43.15,
-            'Longitude': -77.61,
-            'Azimuth': 240,
-        }])
+        dataframe = pd.DataFrame([
+            {
+                'Timestamp': 'not a timestamp',
+                'Latitude': 43.15,
+                'Longitude': -77.61,
+                'Azimuth': 240,
+            },
+            {
+                'Timestamp': '2024-01-15T14:00:00+25:00',
+                'Latitude': 43.16,
+                'Longitude': -77.62,
+                'Azimuth': 240,
+            },
+            {
+                'Timestamp': '2024-01-15T14:00:00 trailing text',
+                'Latitude': 43.17,
+                'Longitude': -77.63,
+                'Azimuth': 240,
+            },
+        ])
         generator = KMLGenerator('', 'Tower/Sector', generator_settings())
+        status_messages = []
+        generator.status_message.connect(status_messages.append)
         root = parse_kml(generator.generate_cell_tower_kml(dataframe))
 
         placemarks = root.findall('.//kml:Placemark', KML_NAMESPACE)
-        for placemark in placemarks:
-            self.assert_identity_only_placemark(placemark, 'tower_sector')
+        for event_number, placemark in enumerate(placemarks, start=1):
+            self.assert_identity_only_placemark(
+                placemark,
+                'tower_sector',
+                expected_event_id=f'event_{event_number:06d}',
+                expected_source_row=str(event_number + 1),
+            )
         self.assertEqual(
             {'tower_sector'},
             {extended_data(placemark)['osloc_component_type'] for placemark in placemarks},
         )
         self.assertEqual('1', document_metadata(root)['osloc_schema_version'])
+        self.assertEqual(3, generator.audit_summary['generated_without_timeline'])
+        untimed_warnings = [
+            message for message in status_messages
+            if 'exported without timeline metadata' in message
+        ]
+        self.assertEqual(1, len(untimed_warnings))
+        self.assertIn('source rows: 2, 3, 4', untimed_warnings[0])
+
+        self.assertEqual(
+            '2024-01-15T19:00:00Z',
+            generator.parse_timestamp_to_kml(
+                '2024-01-15 2:00 PM EST'
+            )[0],
+        )
+
+    def test_missing_timestamp_outcomes_match_record_type_policy(self):
+        tower_cases = (
+            ('Tower/Sector', 'generate_cell_tower_kml', {'Azimuth': 240}),
+            (
+                'Distance from Tower',
+                'generate_distance_from_tower_kml',
+                {'Azimuth': 240, 'Distance': 2.0},
+            ),
+        )
+        for data_type, method_name, fields in tower_cases:
+            with self.subTest(data_type=data_type):
+                generator = KMLGenerator('', data_type, generator_settings())
+                status_messages = []
+                generator.status_message.connect(status_messages.append)
+                record = {
+                    'Timestamp': '   ',
+                    'Latitude': 43.15,
+                    'Longitude': -77.61,
+                    **fields,
+                }
+
+                root = parse_kml(getattr(generator, method_name)(
+                    pd.DataFrame([record])
+                ))
+
+                self.assertTrue(root.findall('.//kml:Placemark', KML_NAMESPACE))
+                self.assertEqual(1, generator.audit_summary['generated_rows'])
+                self.assertEqual(
+                    1, generator.audit_summary['generated_without_timeline']
+                )
+                self.assertEqual(1, len([
+                    message for message in status_messages
+                    if 'exported without timeline metadata' in message
+                ]))
+
+        gps_generator = KMLGenerator(
+            '', 'Location Point', generator_settings()
+        )
+        gps_messages = []
+        gps_generator.status_message.connect(gps_messages.append)
+        gps_root = parse_kml(gps_generator.generate_gps_kml(pd.DataFrame([
+            {
+                'Timestamp': '   ',
+                'Latitude': 43.15,
+                'Longitude': -77.61,
+                'Accuracy': 100,
+            },
+            {
+                'Timestamp': 'not a timestamp',
+                'Latitude': 43.16,
+                'Longitude': -77.62,
+                'Accuracy': 100,
+            },
+        ])))
+
+        self.assertTrue(gps_root.findall('.//kml:Placemark', KML_NAMESPACE))
+        self.assertEqual(1, gps_generator.audit_summary['generated_rows'])
+        self.assertEqual(1, gps_generator.audit_summary['skipped_missing_timestamp'])
+        self.assertEqual(
+            1, gps_generator.audit_summary['generated_without_timeline']
+        )
+        self.assertEqual(1, len([
+            message for message in gps_messages
+            if 'timestamp was missing' in message
+        ]))
+        self.assertEqual(1, len([
+            message for message in gps_messages
+            if 'exported without timeline metadata' in message
+        ]))
 
     def test_disabled_animation_output_has_identity_only_metadata(self):
         dataframe = pd.DataFrame([{

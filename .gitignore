@@ -30,6 +30,7 @@ node_modules/
 /*.geojson
 /*.txt
 !/version_info.txt
+!/requirements-build.txt
 diagnostics/
 exports/
 local-data/

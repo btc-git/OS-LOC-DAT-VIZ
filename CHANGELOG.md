@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [1.3.0-beta.1] - 2026-09-21
+
 ### Added
 - Current-record-set markers with unlimited manual entry, CSV/XLS/XLSX import, row-specific validation warnings, individual colors, and a downloadable coordinate-only template
 - Separate static marker datasets in KML and GeoJSON with dataset-wide and individual controls, always-visible enabled labels, and coordinate details in GeoLibre
@@ -12,13 +14,15 @@
 - Paired GeoJSON output with the same event identity, temporal metadata, geometry, and display colors as KML
 - Stable `osloc_*` dataset, event, component, timezone, and epoch metadata for interoperable viewers
 - GeoLibre viewer plugin with event filtering, timeline playback, map labels, details, and focused navigation
-- Save & Open Viewer action with bundled GeoLibre Desktop, automatic plugin provisioning, and same-named project files
+- Process and Open in Viewer action with bundled GeoLibre Desktop, automatic plugin provisioning, and same-named project files
 - Open Viewer action for loading one or more existing KML or GeoJSON files without generating new outputs
 - Prominent Load GeoJSON action in the viewer panel for reopening validated OS-LOC exports
 - Project-scoped simplified GeoLibre chrome with automatic startup data framing
 - GeoLibre filter fields automatically suggest the first and last corrected record date/time
 - GeoLibre About & Licenses details with bundled plugin and viewer license notices
 - Application Licenses & Third-Party Notices dialog with the full GeoLibre MIT notice
+- Preliminary-review metadata in both KML documents and GeoJSON collections
+- Pinned runtime and Windows build dependencies with packaged third-party license files
 - Clicking a GeoLibre event record now focuses its map geometry and opens its details
 - Automated coverage for import-wizard behavior, temporal KML metadata, geometry preservation, and KML/GeoJSON parity
 
@@ -46,6 +50,7 @@
 - Google Earth event names no longer append geometry labels such as Shaded Area to the primary event title
 - Google Earth Places entries suppress truncated description previews while retaining complete balloon details
 - GeoLibre date/time fields no longer jump or clear while a value is typed manually
+- Valid geometry with an unparseable timestamp now emits a summarized warning and is recorded as untimed in the generation log
 
 ## [1.2] - 2026-09-10
 

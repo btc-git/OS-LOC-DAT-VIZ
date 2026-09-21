@@ -10,9 +10,13 @@ A standalone desktop application for **quick triage and initial visualization** 
 ⚠️ **IMPORTANT: This is for initial review only. All findings must be analyzed and verified.**
 
 <a href="https://github.com/btc-git/OS-LOC-DAT-VIZ/releases/latest/download/OS-LocationDataVisualizer.exe" style="text-decoration:none;font-weight:bold;font-size:1.1em;">
-⬇️ Download the latest OS-LocationDataVisualizer.exe
+⬇️ Download the latest stable OS-LocationDataVisualizer.exe
 </a>
 <br>
+
+Development preview builds are marked **Pre-release** on the
+[GitHub Releases page](https://github.com/btc-git/OS-LOC-DAT-VIZ/releases).
+They do not replace the stable download above.
 
 ## Features
 
@@ -40,7 +44,7 @@ A standalone desktop application for **quick triage and initial visualization** 
 - KML output for Google Earth Pro and compatible GIS software
 - GeoJSON output optimized for GeoLibre/MapLibre workflows
 - Included [GeoLibre viewer plugin](GeoLibre-Plugin/README.md) for filtering, timeline playback, labels, and event details
-- Direct **Save Outputs**, **Save & Open Viewer**, and **Open Viewer** actions using the included GeoLibre Desktop 3.0.0 portable viewer
+- Direct **Process**, **Process and Open in Viewer**, and **Open Viewer** actions using the included GeoLibre Desktop 3.0.0 portable viewer
 - Same-named TXT generation log with source/output hashes, settings, row outcomes, and warnings
 
 ### 🖥️ **User-Friendly Interface**
@@ -66,12 +70,12 @@ A standalone desktop application for **quick triage and initial visualization** 
 2. A file using the application’s standard template headers is recognized automatically.
 3. For other files, the column-mapping wizard opens automatically. Select the worksheet and header row, choose the record type, review the suggested mappings, and optionally limit the import to an inclusive date/time range.
 4. Review the timezone, slash/dash date order, units, and visualization settings. Optionally add or import current-record-set markers on the **Markers** tab.
-5. Click **Save Outputs** to create the KML, GeoJSON, and TXT generation log, or **Save & Open Viewer** to create them and immediately open the GeoJSON in the included viewer. Use **Open Viewer** to review existing KML or GeoJSON files without generating new outputs.
+5. Click **Process** to create the KML, GeoJSON, and TXT generation log, or **Process and Open in Viewer** to create them and immediately open the GeoJSON in the included viewer. Use **Open Viewer** to review existing KML or GeoJSON files without generating new outputs.
 6. Review warnings and row outcomes in the TXT log. All visualizations remain preliminary and require independent expert review.
 
 Each generation writes a `.kml`, `.geojson`, and `.txt` file with the same base name. The log records source and output SHA-256 hashes, import mappings, timestamp interpretation, visualization settings, row outcomes, and warnings without copying source-record contents.
 
-**Save & Open Viewer** also creates a same-named `.geolibre` companion beside the outputs. This small viewer project does not duplicate the source records: it references the GeoJSON and stores its path, display name, dataset identifier, map extent, and viewer/plugin settings so GeoLibre can reopen it with the OS-LOC interface and frame its events automatically. Keep the `.geolibre` file with its GeoJSON; moving or renaming the GeoJSON can break the reference. The project may be deleted without affecting the KML, GeoJSON, or TXT files if convenient reopening is not needed. **Open Viewer** starts a clean, plugin-enabled session. Use the prominent **Load GeoJSON** button beneath the viewer-panel title for previous OS-LOC exports; repeat it to add more record sets. KML files remain available through GeoLibre drag and drop. On first use, the application verifies and extracts its pinned GeoLibre portable bundle and installs the included OS-LOC viewer plugin in GeoLibre's per-user plugin directory. Because GeoLibre enforces one running instance per Windows session, close any other GeoLibre window before starting the included viewer.
+**Process and Open in Viewer** also creates a same-named `.geolibre` companion beside the outputs. This small viewer project does not duplicate the source records: it references the GeoJSON and stores its path, display name, dataset identifier, map extent, and viewer/plugin settings so GeoLibre can reopen it with the OS-LOC interface and frame its events automatically. Keep the `.geolibre` file with its GeoJSON; moving or renaming the GeoJSON can break the reference. The project may be deleted without affecting the KML, GeoJSON, or TXT files if convenient reopening is not needed. **Open Viewer** starts a clean, plugin-enabled session. Use the prominent **Load GeoJSON** button beneath the viewer-panel title for previous OS-LOC exports; repeat it to add more record sets. KML files remain available through GeoLibre drag and drop. On first use, the application verifies and extracts its pinned GeoLibre portable bundle and installs the included OS-LOC viewer plugin in GeoLibre's per-user plugin directory. Because GeoLibre enforces one running instance per Windows session, close any other GeoLibre window before starting the included viewer.
 
 For original carrier records that do not match a template, the import wizard opens automatically. It supports CSV, XLS, and XLSX files; worksheet and header-row selection; record-type selection; explicit column mapping; and optional inclusive date/time range filtering. Date selections include the complete start and end days by default; select **Use exact times** for narrower boundaries. **Check Matching Rows** reports both timestamp matches and rows with valid mapped coordinates before import. The filter uses the selected timezone interpretation, excludes timestamps that cannot be parsed or uniquely resolved, and records all filter counts and boundaries in the TXT generation log. Its live preview shows the first 25 source rows with each original column header and the application field currently mapped to it. Azimuth may be left unmapped when it is unavailable; the application will use a 360-degree visualization. Imported records are normalized in memory and the original file is not modified.
 
@@ -134,14 +138,14 @@ Download the standalone executable `OS-LocationDataVisualizer.exe` - no Python i
 
 ### For Developers
 
-**Requirements:**
+**Source Development Requirements:**
 
 - Python 3.11+
-- PyQt6
-- pandas
-- openpyxl
-- xlrd
-- tzdata
+- Node.js for the GeoLibre plugin contract test
+
+Reproducible Windows release builds require Python 3.11.3 and the complete
+`requirements-build.txt` lock. See `requirements.txt` for runtime versions and
+`THIRD_PARTY_NOTICES.md` for the dependency inventory.
 
 **Setup & Installation:**
 
@@ -160,23 +164,24 @@ Download the standalone executable `OS-LocationDataVisualizer.exe` - no Python i
 ```bash
 python -m unittest discover -s tests -v
 node tests/test_plugin_simplified_chrome.mjs
+node --check tools/plugin_performance_harness.mjs
 ```
 
 **Building the Executable:**
 
-1. Install PyInstaller:
+1. Use Python 3.11.3.
+2. Install the complete pinned build environment:
    ```bash
-   python -m pip install pyinstaller
+   python -m pip install -r requirements-build.txt
    ```
-2. Build the executable:
+3. Build the executable:
    ```bash
-   # Option 1: Use the spec file (recommended)
    python -m PyInstaller --clean app.spec
-
-   # Option 2: Full command-line
-   python -m PyInstaller --onefile --windowed --name "OS-LocationDataVisualizer" --icon=wifi_icon.ico --exclude-module=matplotlib --exclude-module=scipy --exclude-module=numba --noupx app.py
    ```
-3. Find the executable in the `dist/` directory (the file will be named `OS-LocationDataVisualizer.exe`)
+4. Find the executable in the `dist/` directory (the file will be named `OS-LocationDataVisualizer.exe`)
+
+Always build through `app.spec`; it packages the icon, version metadata,
+timezone and XLS support, bundled GeoLibre viewer and plugin, and license files.
 
 ## Privacy & Security
 
@@ -205,5 +210,5 @@ This program is distributed in the hope that it will be useful, but WITHOUT ANY 
 
 ---
 Copyright (c) 2025-2026 CrimLawTech LLC
-**Version 1.2**
+**Version 1.3.0-beta.1**
 _Open Source Location Data Visualization Tool_

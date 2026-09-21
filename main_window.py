@@ -2088,6 +2088,7 @@ class MainWindow(QMainWindow):
             "Row outcomes",
             f"Input rows: {summary.get('input_rows', 'Unknown')}",
             f"Generated rows: {summary.get('generated_rows', 'Unknown')}",
+            f"Generated without timeline metadata: {summary.get('generated_without_timeline', 0)}",
             f"Skipped - invalid coordinates: {summary.get('skipped_invalid_coordinates', 'Unknown')}",
             f"Skipped - missing timestamp: {summary.get('skipped_missing_timestamp', 'Unknown')}",
             f"Skipped - DST conflict: {summary.get('skipped_dst_conflict', 'Unknown')}",

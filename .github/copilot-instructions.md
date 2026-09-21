@@ -1,183 +1,115 @@
-# Open Source Location Data Visualizer — AI Coding Agent Guide
+# Open Source Location Data Visualizer - AI Coding Guide
 
-## Project Overview
-Desktop triage tool for converting CSV/Excel location data into paired KML and GeoJSON visualizations. **All outputs are preliminary and require expert review.** Users can customize geometry, colors, units, and time handling for Google Earth and GeoLibre/MapLibre workflows.
+## Purpose
 
-## Architecture & Key Files
+This PyQt6 desktop application converts CSV/XLS/XLSX location records into
+paired KML and GeoJSON visualizations plus a TXT generation log. It is a
+preliminary triage tool: all source interpretation and generated geometry
+require independent expert verification.
 
-**Entry Points & Threading:**
-- `app.py`: Creates Qt application, sets Windows taskbar identity (`SetCurrentProcessExplicitAppUserModelID`), creates MainWindow, shows disclaimer
-- `main_window.py`: Central GUI hub managing UI state, settings persistence, import validation, paired output writes, audit logs, and thread orchestration
-- `kml_generator.py` (QThread subclass): Background worker for KML/GeoJSON generation; emits `progress`, `finished`, `error`, and `status_message` signals
+Use [README.md](../README.md) for user and developer documentation,
+[tests/README.md](../tests/README.md) for automated tests, and
+[tools/README.md](../tools/README.md) for manual diagnostics. Do not duplicate
+those documents here.
 
-**UI & Input:**
-- `widgets.py`: Custom `DragDropWidget` frame with drag-enter feedback (`dragActive` property for styling)
-- `import_wizard.py`: Non-template CSV/XLS/XLSX sheet, header, field, timezone, and date-range mapping workflow
-- `dialogs.py`: `DisclaimerDialog` (shown on every startup, non-negotiable legal requirement); also references `LicenseDialog` from `license_dialog.py`
-- `GeoLibre-Plugin/`: Readable GeoLibre runtime plugin source and manifest; generated ZIP packages remain ignored
+## Ownership Boundaries
 
-## Data Processing Pipeline
+- `app.py` configures and starts Qt. Every startup must show
+  `DisclaimerDialog` through `MainWindow`.
+- `main_window.py` owns UI state, `QSettings`, file selection, worker
+  orchestration, paired output writes, and audit logs.
+- `import_wizard.py` owns custom CSV/Excel loading, column mapping, timezone
+  choices, date filtering, and optional cell-site-list joins.
+- `kml_generator.py` owns parsing, geographic calculations, KML/GeoJSON
+  generation, shared metadata, row outcomes, and worker signals.
+- `geolibre_launcher.py` owns bundled-viewer verification, extraction, plugin
+  provisioning, project files, and process launch.
+- `GeoLibre-Plugin/dist/` is the readable runtime plugin source. Its generated
+  ZIP is intentionally ignored.
 
-1. **File Input** → `handle_file_selection(file_path)`: Recognizes standard templates directly and opens `ImportWizardDialog` for other CSV/XLS/XLSX layouts
-2. **Type Detection** → Column header matching with case-insensitive, flexible name aliases:
-   - **Tower/Sector**: Has Latitude, Longitude, Timestamp, Azimuth (NO Distance) → creates sector wedges
-   - **Distance from Tower**: Has Latitude, Longitude, Timestamp, Azimuth, Distance → creates sector + distance band
-   - **Location Point**: Has Latitude, Longitude, Timestamp, optionally Accuracy → creates accuracy circles
-3. **Validation** → Button disabled if type unclear; shows status messages with emoji indicators (✅, ⚠️, ❌, 📊, 📄)
-4. **Output Generation** → Threaded via `KMLGenerator.run()`:
-  - Calls type-specific KML and GeoJSON generators
-  - Preserves source coordinate text precision and formats derived geometry to 6 decimal places
-  - Adds matching dataset/event/component/time metadata to both formats
-  - Uses KML `<TimeSpan>` and GeoJSON epoch metadata for time filtering
-   - Custom labels XML-escaped via `xml.sax.saxutils.escape()` before insertion into KML
-5. **Output** → `finished` emits a `{kml, geojson}` payload; `on_generation_finished()` writes same-named `.kml`, `.geojson`, and `.txt` audit-log files, then opens the containing folder
+Keep changes inside the owning module unless a contract genuinely crosses a
+boundary. Never update Qt widgets directly from the worker thread.
 
-## Project-Specific Patterns
+## Required Behavior
 
-### Legal & Disclaimers
-- **Always** show `DisclaimerDialog` on startup—required by project governance
-- All KML documents include preliminary/triage language in descriptions
-- License (GPL v3.0) enforced via LICENSE file; project header in all source files
+- Keep generation in `KMLGenerator` (`QThread`). Communicate through
+  `progress`, `finished`, `error`, and `status_message` signals.
+- Generate matching KML and GeoJSON together. The UI also writes a same-stem
+  TXT audit log; `Process and Open in Viewer` additionally writes a GeoLibre
+  project.
+- Preserve the preliminary-review notice in KML document metadata and GeoJSON
+  collection metadata.
+- Preserve source coordinate text precision. Format only derived geometry
+  vertices and endpoints to six decimal places.
+- Keep KML/GeoJSON dataset, event, component, temporal, style, and source-row
+  metadata in parity. KML uses standard 2.2 elements, not `gx:` extensions.
+- Missing azimuth produces a 360-degree visualization. Missing distance omits
+  the distance band. Missing location accuracy uses the configured default.
+  Emit summarized warnings for these outcomes.
+- Valid geometry with an unparseable timestamp remains untimed and emits a
+  warning. Missing Location Point timestamps and DST-ambiguous/nonexistent
+  local times are omitted and reported.
+- Reference sites and user markers are separate, static auxiliary datasets.
+  Markers belong only to the currently selected source record set.
+- Escape user-controlled KML/XML text with the existing XML helpers. Continue
+  using structured JSON serialization for GeoJSON.
 
-### Missing Data Handling (Never Fail Silently)
-- **Missing Azimuth** → Create 360° circle instead of wedge; emit ⚠️ status message with count
-- **Missing Distance** → Skip distance visualization for that row; emit ⚠️ status message
-- **Missing Accuracy (Location Point)** → Use configurable default (100 meters); emit ⚠️ status message with default value
-- All edge cases logged via `status_message` signal to UI console
+## Data And File Safety
 
-### Settings Persistence & State
-- Settings stored in `QSettings("OpenSource", "LocationDataVisualizer")`
-- Configurable per-session: leg length (0.5–20 mi), sector width (30–360°), shaded area length (0.1–10 mi), default accuracy, colors, time animation duration
-- Distance band settings: inner/outer thickness (default 0), configurable units (Meters/Feet/Miles/Kilometers), band color
-- Custom label field (`custom_label_input`) for user-provided dataset names; XML-escaped for KML and sanitized for filenames
+- Use `pathlib.Path` for paths.
+- Never commit source records or generated KML, KMZ, GeoJSON, TXT, GeoLibre,
+  diagnostic, build, or executable output. Respect `.gitignore`; keep local
+  sensitive diagnostics under `diagnostics/`.
+- Do not place real location records in tests. Use synthetic identifiers and
+  coordinates.
+- Do not add source-record values to logs beyond the existing bounded row
+  references, filenames, mappings, counts, settings, and hashes.
+- The bundled GeoLibre archive is intentionally tracked. If it changes, update
+  and verify the pinned SHA-256 in `GeoLibre-Viewer/README.md` and
+  `geolibre_launcher.py`.
 
-### Status Console & User Feedback
-- Use `add_status_message(msg)` for all user-visible feedback (errors, warnings, progress)
-- Prefix with emoji: ✅ success, ⚠️ warning, 📊 data type, 📄 file type, 📁 templates
-- Messages timestamped and scrollable in status QTextEdit
+## Implementation Conventions
 
-### UI Theme & Styling
-- **Dark theme**: `apply_dark_theme()` sets stylesheet for all widgets (backgrounds #1e1e1e, text #ffffff)
-- **Color pickers**: Linked to KML output (leg color, shaded area color, distance/TA color, GPS circle color) via QColorDialog
-- **Icons**: Generated programmatically—`create_pushpin_icon()` draws WiFi arcs for taskbar/window; no PNG/ICO files required (except app icon)
+- Use modern PyQt6 signal connections: `widget.signal.connect(slot)`.
+- Route worker feedback through `status_message`; route main-thread UI feedback
+  through `add_status_message()` and dialogs.
+- Reuse normalized, case-insensitive column helpers rather than direct
+  case-sensitive header assumptions.
+- Maintain explicit source and display timezone semantics. Explicit offsets in
+  records take precedence over configured source timezone choices.
+- Use named timezones for historical DST behavior and fixed offsets only when
+  the user selected one.
+- Keep application version declarations synchronized in `version.py`,
+  `version_info.txt`, `CHANGELOG.md`, and the README footer. GeoLibre viewer and
+  plugin versions are independent.
+- Update nearby regression tests whenever output metadata, parsing, geometry,
+  UI labels, or viewer contracts change.
 
-### File Handling
-- **Always** use `Path` from `pathlib` for cross-platform compatibility (Windows/Unix)
-- Drag/drop and import workflows accept `.csv`, `.xls`, and `.xlsx`
-- CSV uses pandas; `.xlsx` uses openpyxl and `.xls` uses xlrd
-- Keep source records and generated KML/GeoJSON/log files outside Git; root-level data formats and diagnostic output directories are ignored
+## Verify Changes
 
-### Threading & Signals
-- Output generation **must** run in the `QThread` worker (not the main thread)
-- Emit progress (0–100), finished (KML/GeoJSON dict), error (exception str), and status_message (UI updates) via Qt signals
-- Main window connects slots: `progress_bar.setValue()`, `on_generation_finished()`, `on_generation_error()`, `add_status_message()`
-- Never call UI updates directly from worker thread
+Install and run from the repository root:
 
-### Geographic Calculations
-- `destination_point(lat, lon, azimuth_deg, distance_miles)`: Returns new (lat, lon) using spherical haversine math
-  - Earth radius: 3960 miles; handles edge case when distance < 1e-9
-  - Used for: sector wedge arcs, directional legs, distance circles, accuracy rings
-- Azimuths: 0° = North, 90° = East, 180° = South, 270° = West
-- Distance conversions handled in `convert_gps_accuracy_to_miles()` and `convert_ta_distance_to_miles()` (Meters/Feet/Miles/Kilometers)
-
-### Timestamp Parsing
-- `parse_timestamp_to_kml(timestamp_str)`: Handles 18+ flexible formats with selected or explicit timezone interpretation
-  - **Supported formats** (all tested and working):
-    - **ISO**: `2025-01-15T14:30:00`, `2025-01-15 14:30`, `2025-01-15`, `2025/02/11 11:06:07`
-    - **US 4-digit**: `01/15/2025 2:30 PM`, `01/15/2025 2:30`, `01/15/2025`
-    - **US 2-digit**: `07/30/24 13:00:20`, `07/30/24 13:00`, `07/30/24` (auto-converts: 00–30 → 2000–2030, 31–99 → 1931–1999)
-    - **European**: `15.01.2025 14:30:00`, `15.01.2025 14:30`, `15.01.2025`
-    - **Time-only**: `14:30:00`, `2:30 PM` (uses today's date)
-    - **Excel serial**: `45696.7637037037` (converts with Excel epoch, handles 1900 leap year bug)
-    - **With timezone**: `2019/05/03 18:36:04 (GMT -4)`, `2025-02-11T14:30:00Z`, and recognized abbreviations
-  - Explicit timezone information in a record takes precedence over the selected source timezone or fixed offset
-  - Named timezones apply historical DST rules; ambiguous or nonexistent local times are omitted and reported
-  - **Return value**: Tuple `(KML ISO format YYYY-MM-DDTHH:MM:SSZ, display label)`
-  - **Edge cases**:
-    - Time-only entries use today's date; display shows only time
-    - Unparseable entries return `(None, original_string)` (never fail silently, logged via status_message)
-    - 2-digit years auto-convert: ≤30 → 2000–2030, >30 → 1931–1999
-    - AM/PM parsing: 12:30 PM → 12:30, 1:30 PM → 13:30, 12:30 AM → 00:30
-- Duration-based animation: `create_time_element()` calculates end time by adding `duration_minutes` setting
-
-## Data Type Detection Example
-```python
-# Tower/Sector: Required columns (case-insensitive, flexible naming)
-#   ['Latitude'|'lat', 'Longitude'|'lon'|'long', 'Timestamp'|'Time'|'DateTime', 'Azimuth'|'bearing'|'direction']
-#   Generates: Shaded sector wedge, center label, directional legs
-
-# Distance from Tower: Tower/Sector columns PLUS Distance
-#   + ['Distance'|'range'|'distance (m)'|'distance (meters)']
-#   Generates: Sector + distance band with configurable inner/outer thickness
-#   Can handle missing azimuth (→ 360° band) or missing distance (→ wedge only)
-#   Band always includes black "Reported Distance" center line at exact distance
-
-# Location Point: Minimal required
-#   ['Latitude'|'lat', 'Longitude'|'lon'|'long', 'Timestamp'|'Time'|'DateTime']
-#   + optionally ['GPS Accuracy'|'Accuracy'|'accuracy']
-#   Generates: Accuracy circle at each point (default 100m if missing)
-```
-
-## Build & Test Workflows
-
-**Development:**
-```bash
-pip install -r requirements.txt
-python app.py  # Runs with disclaimer dialog
-```
-
-**Build Executable:**
 ```powershell
-# Option 1: Use app.spec (includes icon config)
-python -m PyInstaller app.spec
-
-# Option 2: Full command-line
-python -m PyInstaller --onefile --windowed --name "OS-LocationDataVisualizer" --icon=wifi_icon.ico --exclude-module=matplotlib --exclude-module=scipy --exclude-module=numba --noupx app.py
+python -m pip install -r requirements.txt
+python app.py
 ```
-Output: `dist/OS-LocationDataVisualizer.exe` (self-contained, ~50MB)
 
-**Testing:**
+Run the automated checks:
+
 ```powershell
 python -m unittest discover -s tests -v
+node tests/test_plugin_simplified_chrome.mjs
 node --check tools/plugin_performance_harness.mjs
 ```
-- Automated tests cover import mapping, timezone/DST behavior, KML metadata and geometry, and KML/GeoJSON parity
-- Manual diagnostics live in `tools/`; their potentially sensitive outputs belong in the ignored `diagnostics/` directory
 
-## Integration Points
+For a reproducible Windows release build, use Python 3.11.3, install the
+complete build lock, and build only through the tracked spec:
 
-**KML Structure:**
-- Root: `<Document>` with standard KML 2.2 namespace (no `gx:` extensions)
-- Default output uses one dataset folder and safely consolidates event components with `<MultiGeometry>`; legacy event folders remain optional
-- Shared document-level styles and compact anchor metadata reduce repeated KML content
-- Source coordinates preserve supplied precision; derived vertices/endpoints use 6 decimal places
-- Colors: AABBGGRR format (alpha, then BGR); transparency via `7d` prefix for shading, `4d` for GPS circles
-- Time animation: `<TimeSpan><begin>2025-01-15T14:30:00Z</begin><end>2025-01-15T15:00:00Z</end></TimeSpan>`
-- Band polygons use `<outline>0</outline>` to prevent outline doubling the fill color
+```powershell
+python -m pip install -r requirements-build.txt
+python -m PyInstaller --clean app.spec
+```
 
-**Windows Integration:**
-- Taskbar grouping: stable `SetCurrentProcessExplicitAppUserModelID('opensource.locationvisualizer')`
-- Explorer integration: `subprocess.Popen(['explorer', '/select,', file_path])`
-
-**User Workflows:**
-1. Click 📁 Templates → select Tower/Sector/Distance/Location Point → XLSX file downloads
-2. User edits XLSX with their data
-3. Drag-drop or Browse → app auto-detects type → shows in status console
-4. Adjust visualization settings (colors, sector width, leg length) in tabs
-5. Click "Generate Output Files" → progress bar, background thread → save dialog → writes KML, GeoJSON, and TXT siblings
-6. Status console shows warnings for missing data (⚠️)
-
-## Code Style & Conventions
-
-- **PyQt6 signals/slots**: Use modern syntax `widget.signal.connect(slot_method)`, not SIGNAL()/SLOT()
-- **F-strings**: All string formatting (`f"Value: {var}"`)
-- **Path handling**: `from pathlib import Path`, use `.suffix`, `.stem`, `/` operator
-- **Pandas column access**: Case-insensitive matching via `get_column_value(row, ['Name1', 'name2', 'NAME3'])` utility
-- **Settings access**: `self.settings.value(key, default)` and `self.settings.setValue(key, value)`
-- **Docstrings**: Include for geographic/math functions; geo functions document Earth radius and units
-- **No external assets**: Icons programmatically created (WiFi arcs in `create_pushpin_icon()`); app icon from `wifi_icon.ico`
-- **Exception handling**: Emit `error` signal in threads; use `QMessageBox` for user-facing errors in main thread
-
----
-
-**Last Updated:** September 2026 | Based on v1.2 codebase analysis
+The spec packages the icon, Windows version metadata, timezone data, XLS
+support, GeoLibre viewer archive, plugin, and required license files. Do not
+replace it with a reduced one-line PyInstaller command in documentation.

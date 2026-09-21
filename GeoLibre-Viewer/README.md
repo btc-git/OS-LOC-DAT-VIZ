@@ -1,7 +1,8 @@
 # Bundled GeoLibre Viewer
 
 The Windows build packages the unmodified GeoLibre Desktop 3.0.0 x64 portable
-archive for the **Save & Open Viewer** and standalone **Open Viewer** workflows.
+archive for the **Process and Open in Viewer** and standalone **Open Viewer**
+workflows.
 
 - Upstream project: <https://github.com/opengeos/GeoLibre>
 - Version: `3.0.0`

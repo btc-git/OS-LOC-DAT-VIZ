@@ -347,13 +347,13 @@ class GenerationActionTests(unittest.TestCase):
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
 
-    def test_window_exposes_save_and_viewer_actions(self):
+    def test_window_exposes_process_and_viewer_actions(self):
         with patch.object(MainWindow, "show_disclaimer_dialog"):
             window = MainWindow()
         self.addCleanup(window.close)
 
-        self.assertEqual("Save Outputs", window.generate_button.text())
-        self.assertEqual("Save & Open Viewer", window.viewer_button.text())
+        self.assertEqual("Process", window.generate_button.text())
+        self.assertEqual("Process and Open in Viewer", window.viewer_button.text())
         self.assertEqual("Open Viewer", window.open_viewer_button.text())
         self.assertEqual(
             ["YMD", "YDM", "MDY", "DMY"],
@@ -442,6 +442,9 @@ class GenerationActionTests(unittest.TestCase):
             "Licenses & Third-Party Notices", dialog.windowTitle()
         )
         self.assertIn("OS-LOC-DAT-VIZ - GNU GPL v3.0", license_text)
+        self.assertIn("THIRD-PARTY DEPENDENCY INVENTORY", license_text)
+        self.assertIn("PyQt6", license_text)
+        self.assertIn("pandas", license_text)
         self.assertIn("BUNDLED THIRD-PARTY SOFTWARE", license_text)
         self.assertIn("GeoLibre 3.0.0", license_text)
         self.assertIn("Copyright (c) 2026 Qiusheng Wu", license_text)
