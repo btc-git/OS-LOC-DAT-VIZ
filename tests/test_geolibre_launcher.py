@@ -21,7 +21,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtCore import QTimer
 from PyQt6.QtTest import QSignalSpy
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QHBoxLayout
 
 import geolibre_launcher
 from geolibre_launcher import (
@@ -489,6 +489,9 @@ class GenerationActionTests(unittest.TestCase):
                 for index in range(window.tab_widget.count())
             ],
         )
+        self.assertTrue(window.marker_drop_widget.property("compact"))
+        self.assertIsInstance(window.marker_drop_widget.layout(), QHBoxLayout)
+        self.assertLessEqual(window.marker_drop_widget.maximumHeight(), 62)
 
         window.add_marker_row()
         window.marker_table.item(0, 0).setText("Court")

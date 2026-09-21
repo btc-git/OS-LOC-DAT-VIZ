@@ -596,12 +596,7 @@ class MainWindow(QMainWindow):
         marker_layout.setContentsMargins(8, 8, 8, 8)
         marker_layout.setSpacing(6)
 
-        self.marker_drop_widget = DragDropWidget()
-        self.marker_drop_widget.setMinimumHeight(82)
-        self.marker_drop_widget.setMaximumHeight(92)
-        self.marker_drop_widget.drop_label.setText(
-            "Drop a Markers CSV or Excel file here"
-        )
+        self.marker_drop_widget = DragDropWidget(compact=True)
         self.marker_drop_widget.browse_button.setText("Import Marker List")
         self.marker_drop_widget.file_dropped.connect(self.import_marker_file)
         self.marker_drop_widget.browse_button.clicked.connect(
@@ -883,6 +878,30 @@ class MainWindow(QMainWindow):
                 border: 1px solid #555555;
                 border-radius: 4px;
                 padding: 4px;
+            }
+            QTableWidget {
+                background-color: #1e1e1e;
+                alternate-background-color: #252525;
+                color: #ffffff;
+                gridline-color: #4a4a4a;
+                border: 1px solid #555555;
+                selection-background-color: #0b6fb8;
+                selection-color: #ffffff;
+            }
+            QHeaderView::section {
+                background-color: #363636;
+                color: #ffffff;
+                border: none;
+                border-right: 1px solid #555555;
+                border-bottom: 1px solid #555555;
+                padding: 6px;
+                font-weight: bold;
+            }
+            QTableCornerButton::section {
+                background-color: #363636;
+                border: none;
+                border-right: 1px solid #555555;
+                border-bottom: 1px solid #555555;
             }
             QProgressBar {
                 border: 1px solid #555555;

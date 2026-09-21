@@ -3,7 +3,7 @@ Open Source Location Data Visualizer - github.com/btc-git/OS-LOC-DAT-VIZ
 Licensed under the GNU General Public License v3.0 - see LICENSE file for details
 """
 
-from PyQt6.QtWidgets import QFrame, QVBoxLayout, QLabel, QPushButton
+from PyQt6.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QLabel, QPushButton
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QDragEnterEvent, QDropEvent
 
@@ -12,17 +12,28 @@ class DragDropWidget(QFrame):
     """Custom widget that accepts drag and drop for CSV and Excel files"""
     file_dropped = pyqtSignal(str)  # Signal emitted when file is dropped
     
-    def __init__(self):
+    def __init__(self, compact=False):
         super().__init__()
+        self.setProperty("compact", compact)
         self.setAcceptDrops(True)
         self.setFrameStyle(QFrame.Shape.Box)
         self.setLineWidth(2)
-        self.setMinimumHeight(80)
+        self.setMinimumHeight(54 if compact else 80)
+        if compact:
+            self.setMaximumHeight(62)
         
         # Create layout for drop zone
-        layout = QVBoxLayout(self)
+        layout = QHBoxLayout(self) if compact else QVBoxLayout(self)
+        if compact:
+            layout.setContentsMargins(14, 7, 8, 7)
+            layout.setSpacing(12)
         
-        self.drop_label = QLabel("📁 Drag & Drop CSV or Excel File Here\n\n— OR —")
+        label_text = (
+            "📁 Drop CSV or Excel marker list here"
+            if compact else
+            "📁 Drag & Drop CSV or Excel File Here\n\n— OR —"
+        )
+        self.drop_label = QLabel(label_text)
         self.drop_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.drop_label.setStyleSheet("""
             QLabel {
@@ -36,9 +47,16 @@ class DragDropWidget(QFrame):
         self.browse_button = QPushButton("Browse for File")
         self.browse_button.setMaximumWidth(200)
         
-        layout.addWidget(self.drop_label)
-        layout.addSpacing(12)  # Add space above button for symmetry
-        layout.addWidget(self.browse_button, alignment=Qt.AlignmentFlag.AlignCenter)
+        if compact:
+            layout.addWidget(self.drop_label, 1)
+            layout.addWidget(self.browse_button)
+        else:
+            layout.addWidget(self.drop_label)
+            layout.addSpacing(12)  # Add space above button for symmetry
+            layout.addWidget(
+                self.browse_button,
+                alignment=Qt.AlignmentFlag.AlignCenter,
+            )
         
         self.setStyleSheet("""
             DragDropWidget {
@@ -49,6 +67,10 @@ class DragDropWidget(QFrame):
             }
             DragDropWidget[dragActive="true"] {
                 background-color: #1a3a5c;
+            }
+            DragDropWidget[compact="true"] {
+                border-radius: 6px;
+                padding: 0px;
             }
         """)
     
