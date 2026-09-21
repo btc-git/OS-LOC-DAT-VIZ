@@ -28,6 +28,7 @@ A standalone desktop application for **quick triage and initial visualization** 
 - Configurable distance band (inner/outer) for Distance from Tower data
 - Color-coded data types with customizable colors
 - Static reference-site dots with a selectable color and a configurable nearby-CSL radius
+- Unlimited static markers with individual colors, map labels, and details
 - Configurable unit support (Meters, Feet, Miles, Kilometers)
 - Time animation support for chronological display
 
@@ -35,6 +36,7 @@ A standalone desktop application for **quick triage and initial visualization** 
 
 - Paired KML and GeoJSON exports with matching event and dataset metadata
 - Independently toggleable, untimed reference-site record set for tower-based outputs
+- Separate static Markers record set with whole-set and individual marker controls
 - KML output for Google Earth Pro and compatible GIS software
 - GeoJSON output optimized for GeoLibre/MapLibre workflows
 - Included [GeoLibre viewer plugin](GeoLibre-Plugin/README.md) for filtering, timeline playback, labels, and event details
@@ -45,6 +47,7 @@ A standalone desktop application for **quick triage and initial visualization** 
 
 - Drag-and-drop CSV, XLS, and XLSX input
 - Built-in sample XLSX templates for proper formatting
+- Manual marker entry plus CSV/XLS/XLSX marker-list drag and drop
 - Automatic column-mapping wizard for files that do not match a standard template
 - Optional separate cell site list joined by mapped site/node and sector/cell IDs as the authoritative tower-coordinate source
 - Optional inclusive date/time range filtering during import
@@ -62,7 +65,7 @@ A standalone desktop application for **quick triage and initial visualization** 
 1. Drag and drop a CSV or Excel file into the program, or use the Browse for File button.
 2. A file using the application’s standard template headers is recognized automatically.
 3. For other files, the column-mapping wizard opens automatically. Select the worksheet and header row, choose the record type, review the suggested mappings, and optionally limit the import to an inclusive date/time range.
-4. Review the timezone, slash/dash date order, units, and visualization settings.
+4. Review the timezone, slash/dash date order, units, and visualization settings. Optionally add or import current-record-set markers on the **Markers** tab.
 5. Click **Save Outputs** to create the KML, GeoJSON, and TXT generation log, or **Save & Open Viewer** to create them and immediately open the GeoJSON in the included viewer. Use **Open Viewer** to review existing KML or GeoJSON files without generating new outputs.
 6. Review warnings and row outcomes in the TXT log. All visualizations remain preliminary and require independent expert review.
 
@@ -76,6 +79,8 @@ Tower/Sector and Distance from Tower imports can optionally use a separate cell 
 
 Tower-based outputs also contain a separate **Reference Sites** record set that can be toggled independently. Without a CSL, it contains each unique tower coordinate used by the records. With a CSL, it contains the used sites plus unique CSL sites within the configured radius of any used site; the default radius is 25 miles. Sectors sharing one coordinate are combined into one dot. Reference dots show every contributing CSL spreadsheet row, the mapped site ID when available, and the source coordinates. If no CSL is used, they show the contributing original-record rows instead. They use the color selected under **Reference Site Dots** and remain visible during timeline playback and date filtering.
 
+The **Markers** tab accepts unlimited manual points or a dropped/browsed CSV, XLS, or XLSX marker list. Each valid row needs `Label`, `Latitude`, `Longitude`, and `Color`; colors may be familiar names such as `red`, `green`, `yellow`, `orange`, `blue`, `purple`, or `black`, or a `#RRGGBB` value. Invalid imported rows are skipped with row-specific status warnings. Markers are exported as a separate untimed record set, remain visible during timeline playback, and provide both whole-set and individual controls in GeoLibre. An enabled marker always shows its label, and its details include the label and source coordinates. Markers belong only to the current source record set: selecting or importing another source clears them, and they are not retained between application sessions.
+
 ### Data Format Reference
 
 **For Tower/Sector Data:**
@@ -86,6 +91,9 @@ Tower-based outputs also contain a separate **Reference Sites** record set that 
 
 **For Location Point Data:**
 - `Timestamp`, `Latitude`, `Longitude`, `Accuracy` (optional)
+
+**For Marker Lists:**
+- `Label`, `Latitude`, `Longitude`, `Color`
 
 The templates use one combined `Timestamp` column, which is recommended. Input files may instead use separate `Date` and `Time` columns, including common variants such as `Conn. Date` and `Conn. Time (UTC)`. Common combined fields such as `Start DateTime`, `StartTime`, `Record Open Date/Time`, and `Msg Send Date` are also recognized.
 
@@ -172,7 +180,7 @@ node tests/test_plugin_simplified_chrome.mjs
 
 ## Privacy & Security
 
-Location-data processing and export run locally; the application does not upload source or output files. Generated KML, GeoJSON, TXT, and GeoLibre project files can contain sensitive information and should be handled together. The GeoLibre project does not duplicate source records, but it contains the GeoJSON's absolute path, dataset name or identifier, and map extent. The included viewer loads its default basemap from OpenFreeMap, which requires a network connection and discloses ordinary tile-request metadata such as IP address and viewed map area to that service. Opening project links or exported files in other applications is subject to those applications' behavior.
+Location-data processing and export run locally; the application does not upload source or output files. Marker entry is coordinate-only: the application does not send addresses to an online geocoding service. Generated KML, GeoJSON, TXT, and GeoLibre project files can contain sensitive information and should be handled together. The GeoLibre project does not duplicate source records, but it contains the GeoJSON's absolute path, dataset name or identifier, and map extent. The included viewer loads its default basemap from OpenFreeMap, which requires a network connection and discloses ordinary tile-request metadata such as IP address and viewed map area to that service. Opening project links or exported files in other applications is subject to those applications' behavior.
 
 ## Important Disclaimers
 
@@ -184,7 +192,7 @@ Location-data processing and export run locally; the application does not upload
 
 ## Sample Data Templates
 
-The application includes built-in templates for each data type. Click the "📁 Templates" button in the application to download properly formatted XLSX files with sample data and correct column headers.
+The application includes built-in templates for each source data type plus marker lists. Click the "📁 Templates" button in the application to download properly formatted XLSX files with sample data and correct column headers.
 
 ---
 ## License

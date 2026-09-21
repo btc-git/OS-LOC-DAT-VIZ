@@ -56,7 +56,11 @@ const plugin = pluginModule.default;
 const {
     eventDisplayMinute,
     eventMatchesDateTimeBounds,
+    eventUsesMapLabel,
+    formatMapTimeLabel,
+    humanizeEventType,
     loadOslocGeoJson,
+    markerColorExpression,
     normalizeDateTimeFilterValue,
     parseOslocGeoJson,
     referenceSiteRowDetails,
@@ -83,6 +87,21 @@ assert.equal(normalizeDateTimeFilterValue("2024-01-15T24:00"), null);
 assert(
     JSON.stringify(sharedPointVisibilityFilter()).includes('reference_site')
 );
+assert(
+    JSON.stringify(sharedPointVisibilityFilter()).includes('marker')
+);
+assert.deepEqual(
+    markerColorExpression(),
+    ["coalesce", ["get", "osloc_style_marker_color_rgba"], "#e53935"],
+);
+assert.equal(humanizeEventType("marker"), "Marker");
+assert.equal(
+    formatMapTimeLabel({ eventType: "marker", label: "Residence" }),
+    "Residence",
+);
+assert(eventUsesMapLabel({ eventType: "marker" }, false));
+assert(!eventUsesMapLabel({ eventType: "reference_site" }, false));
+assert(eventUsesMapLabel({ eventType: "location", startMs: 1, endMs: 2 }, true));
 assert.deepEqual(
     referenceSiteRowDetails({
         eventType: "reference_site",

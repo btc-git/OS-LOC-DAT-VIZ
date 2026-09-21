@@ -1,7 +1,7 @@
 {
   "id": "osloc-dat-viz-viewer",
   "name": "OS-LOC-DAT-VIZ Viewer",
-  "version": "0.0.46",
+  "version": "0.0.47",
   "entry": "dist/index.js",
   "style": "dist/style.css",
   "description": "OS-LOC-DAT-VIZ viewer with direct GeoJSON loading, date/time filtering, timeline playback, synchronized labels, and focused navigation",

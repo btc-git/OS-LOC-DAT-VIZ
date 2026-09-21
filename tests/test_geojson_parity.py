@@ -104,6 +104,144 @@ def geojson_primitive_counts_by_event(geojson_text):
 
 
 class GeoJSONParityTests(unittest.TestCase):
+    def test_markers_are_exported_for_every_primary_record_type(self):
+        marker = {
+            'label': 'Reference Point',
+            'latitude': 43.1,
+            'longitude': -77.1,
+            'latitude_text': '43.1',
+            'longitude_text': '-77.1',
+            'color': '#000000',
+            'source_row': None,
+        }
+        cases = (
+            ('Tower/Sector', 'generate_cell_tower_kml',
+             'generate_cell_tower_geojson'),
+            ('Distance from Tower', 'generate_distance_from_tower_kml',
+             'generate_distance_from_tower_geojson'),
+            ('Location Point', 'generate_gps_kml', 'generate_gps_geojson'),
+        )
+
+        for data_type, kml_method_name, geojson_method_name in cases:
+            with self.subTest(data_type=data_type):
+                generator = KMLGenerator(
+                    '', data_type, generator_settings(), markers=[marker]
+                )
+                empty_records = pd.DataFrame()
+                kml_text = getattr(generator, kml_method_name)(empty_records)
+                geojson_payload = json.loads(
+                    getattr(generator, geojson_method_name)(empty_records)
+                )
+
+                self.assertIn(f'{data_type if data_type != "Distance from Tower" else "Distance from Tower Analysis"}', kml_text)
+                self.assertEqual(
+                    1,
+                    sum(
+                        feature['properties'].get('osloc_event_type') == 'marker'
+                        for feature in geojson_payload['features']
+                    ),
+                )
+
+    def test_markers_are_static_colored_auxiliary_dataset_in_both_formats(self):
+        records = pd.DataFrame([{
+            'Timestamp': '2024-01-15T14:00:00Z',
+            'Latitude': '43.100000',
+            'Longitude': '-77.100000',
+            'Accuracy': 50,
+        }])
+        markers = [
+            {
+                'label': 'Residence',
+                'latitude': 43.15831,
+                'longitude': -77.60938,
+                'latitude_text': '43.158310',
+                'longitude_text': '-77.609380',
+                'color': '#ff0000',
+                'source_row': 2,
+            },
+            {
+                'label': 'Meeting Point',
+                'latitude': 43.2,
+                'longitude': -77.7,
+                'latitude_text': '43.2',
+                'longitude_text': '-77.7',
+                'color': '#3366cc',
+                'source_row': None,
+            },
+        ]
+        generator = KMLGenerator(
+            '', 'Location Point', generator_settings(), markers=markers
+        )
+
+        kml_root = ET.fromstring(generator.generate_gps_kml(records))
+        geojson_payload = json.loads(generator.generate_gps_geojson(records))
+
+        folders = kml_root.findall('kml:Document/kml:Folder', KML_NAMESPACE)
+        self.assertEqual(2, len(folders))
+        marker_folder = folders[1]
+        self.assertEqual(
+            'Location Point Data - Markers',
+            marker_folder.findtext('kml:name', namespaces=KML_NAMESPACE),
+        )
+        marker_placemarks = marker_folder.findall(
+            'kml:Placemark', KML_NAMESPACE
+        )
+        self.assertEqual(2, len(marker_placemarks))
+        self.assertTrue(all(
+            placemark.find('kml:TimeSpan', KML_NAMESPACE) is None
+            for placemark in marker_placemarks
+        ))
+
+        first_metadata = parse_kml_extended_data(marker_placemarks[0])
+        primary_dataset_id = parse_kml_extended_data(
+            kml_root.find('kml:Document', KML_NAMESPACE)
+        )['osloc_dataset_id']
+        self.assertNotEqual(primary_dataset_id, first_metadata['osloc_dataset_id'])
+        self.assertEqual('marker', first_metadata['osloc_event_type'])
+        self.assertEqual('marker', first_metadata['osloc_component_type'])
+        self.assertEqual('Residence', first_metadata['osloc_event_label'])
+        self.assertEqual('43.158310, -77.609380',
+                         first_metadata['osloc_source_coordinate_text'])
+        self.assertEqual('ff0000ff', first_metadata['osloc_style_marker_color'])
+        self.assertEqual(
+            '-77.609380,43.158310,0',
+            marker_placemarks[0].findtext(
+                'kml:Point/kml:coordinates', namespaces=KML_NAMESPACE
+            ),
+        )
+        self.assertEqual(
+            '0.9', marker_placemarks[0].findtext(
+                'kml:Style/kml:LabelStyle/kml:scale', namespaces=KML_NAMESPACE
+            ),
+        )
+        self.assertIn('Coordinates', marker_placemarks[0].findtext(
+            'kml:description', namespaces=KML_NAMESPACE
+        ))
+
+        marker_features = [
+            feature for feature in geojson_payload['features']
+            if feature['properties'].get('osloc_event_type') == 'marker'
+        ]
+        self.assertEqual(2, len(marker_features))
+        self.assertEqual(
+            {first_metadata['osloc_dataset_id']},
+            {
+                feature['properties']['osloc_dataset_id']
+                for feature in marker_features
+            },
+        )
+        self.assertEqual(
+            'rgba(255, 0, 0, 1)',
+            marker_features[0]['properties'][
+                'osloc_style_marker_color_rgba'
+            ],
+        )
+        self.assertNotIn('osloc_start_epoch_ms', marker_features[0]['properties'])
+        self.assertEqual(
+            [-77.60938, 43.15831, 0.0], marker_features[0]['geometry']['coordinates']
+        )
+        self.assertEqual(2, generator.audit_summary['markers_generated'])
+
     def test_csl_reference_sites_are_static_deduplicated_and_radius_filtered(self):
         records = pd.DataFrame([{
             'Timestamp': '2024-01-15T14:00:00Z',

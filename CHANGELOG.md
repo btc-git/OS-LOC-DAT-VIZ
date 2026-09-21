@@ -5,6 +5,8 @@
 ## [Unreleased]
 
 ### Added
+- Current-record-set markers with unlimited manual entry, CSV/XLS/XLSX import, row-specific validation warnings, individual colors, and a downloadable coordinate-only template
+- Separate static marker datasets in KML and GeoJSON with dataset-wide and individual controls, always-visible enabled labels, and coordinate details in GeoLibre
 - Static, independently toggleable reference-site layers for tower-based KML and GeoJSON outputs, including unique record towers or radius-filtered CSL neighbors, configurable dot color, and a 25-mile default radius
 - Optional separate cell site list import for Tower/Sector and Distance from Tower records, with mapped two-column lookup keys, authoritative tower fields, previews, match accounting, and TXT-log provenance
 - Paired GeoJSON output with the same event identity, temporal metadata, geometry, and display colors as KML

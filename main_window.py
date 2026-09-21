@@ -4,18 +4,22 @@ Licensed under the GNU General Public License v3.0 - see LICENSE file for detail
 """
 
 import hashlib
+import math
 import re
 import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import Font, numbers
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QGridLayout, QPushButton, QLabel, QFileDialog, 
                              QSpinBox, QDoubleSpinBox, QRadioButton, QButtonGroup, 
                              QTextEdit, QGroupBox, QColorDialog, QProgressBar, 
-                             QMessageBox, QTabWidget, QCheckBox, QMenu, QComboBox, QLineEdit, QFrame, QScrollArea)
+                             QMessageBox, QTabWidget, QCheckBox, QMenu, QComboBox,
+                             QLineEdit, QFrame, QScrollArea, QTableWidget,
+                             QTableWidgetItem, QHeaderView, QStyle)
 from PyQt6.QtCore import Qt, QSettings, pyqtSignal
 from PyQt6.QtGui import QFont, QColor, QIcon, QPixmap, QPainter, QPen
 
@@ -37,6 +41,14 @@ from version import APP_VERSION
 class MainWindow(QMainWindow):
     file_inspection_finished = pyqtSignal(bool)
 
+    MARKER_COLUMN_ALIASES = {
+        'label': ('label', 'name', 'marker', 'marker label'),
+        'latitude': ('latitude', 'lat'),
+        'longitude': ('longitude', 'lon', 'long'),
+        'color': ('color', 'colour', 'marker color', 'marker colour'),
+    }
+    DEFAULT_MARKER_COLOR = '#e53935'
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Open Source Location Data Visualizer")
@@ -49,6 +61,7 @@ class MainWindow(QMainWindow):
         self.data_file = None
         self.imported_dataframe = None
         self.reference_sites_dataframe = None
+        self.marker_import_files = []
         self.import_metadata = None
         self.import_target_timezone_name = None
         self.import_target_offset_minutes = None
@@ -58,6 +71,8 @@ class MainWindow(QMainWindow):
         self.current_generation_type = None
         self.current_generation_source_file = None
         self.current_import_metadata = None
+        self.current_generation_marker_count = 0
+        self.current_marker_import_files = []
         self.generation_started_utc = None
         self.open_viewer_after_generation = False
         self.viewer_launcher = None
@@ -210,7 +225,8 @@ class MainWindow(QMainWindow):
         layout.addWidget(file_group, 0)  # No stretch for file input
         
         # Settings tabs
-        tab_widget = QTabWidget()
+        self.tab_widget = QTabWidget()
+        tab_widget = self.tab_widget
         
         # Data Type Tab
         data_type_tab = QWidget()
@@ -575,6 +591,58 @@ class MainWindow(QMainWindow):
         
         tab_widget.addTab(color_tab, "Colors")
 
+        marker_tab = QWidget()
+        marker_layout = QVBoxLayout(marker_tab)
+        marker_layout.setContentsMargins(8, 8, 8, 8)
+        marker_layout.setSpacing(6)
+
+        self.marker_drop_widget = DragDropWidget()
+        self.marker_drop_widget.setMinimumHeight(82)
+        self.marker_drop_widget.setMaximumHeight(92)
+        self.marker_drop_widget.drop_label.setText(
+            "Drop a Markers CSV or Excel file here"
+        )
+        self.marker_drop_widget.browse_button.setText("Import Marker List")
+        self.marker_drop_widget.file_dropped.connect(self.import_marker_file)
+        self.marker_drop_widget.browse_button.clicked.connect(
+            self.browse_marker_file
+        )
+        marker_layout.addWidget(self.marker_drop_widget)
+
+        marker_actions = QHBoxLayout()
+        self.add_marker_button = QPushButton("Add Marker")
+        self.add_marker_button.clicked.connect(self.add_marker_row)
+        self.clear_markers_button = QPushButton("Clear All")
+        self.clear_markers_button.clicked.connect(self.clear_marker_rows)
+        self.marker_count_label = QLabel("0 markers")
+        self.marker_count_label.setStyleSheet("color: #aaaaaa;")
+        marker_actions.addWidget(self.add_marker_button)
+        marker_actions.addWidget(self.clear_markers_button)
+        marker_actions.addStretch()
+        marker_actions.addWidget(self.marker_count_label)
+        marker_layout.addLayout(marker_actions)
+
+        self.marker_table = QTableWidget(0, 5)
+        self.marker_table.setHorizontalHeaderLabels([
+            "Label", "Latitude", "Longitude", "Color", "",
+        ])
+        self.marker_table.verticalHeader().setVisible(False)
+        self.marker_table.setAlternatingRowColors(True)
+        self.marker_table.setSelectionBehavior(
+            QTableWidget.SelectionBehavior.SelectRows
+        )
+        marker_header = self.marker_table.horizontalHeader()
+        marker_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        for column in (1, 2, 3):
+            marker_header.setSectionResizeMode(
+                column, QHeaderView.ResizeMode.ResizeToContents
+            )
+        marker_header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
+        self.marker_table.setColumnWidth(4, 36)
+        marker_layout.addWidget(self.marker_table, 1)
+
+        tab_widget.addTab(marker_tab, "Markers")
+
         self.import_records_button = QPushButton("Import Original Records")
         self.import_records_button.setToolTip(
             "Manually map and import source records using the same workflow used for non-template files"
@@ -583,7 +651,7 @@ class MainWindow(QMainWindow):
         tab_widget.setCornerWidget(self.import_records_button, Qt.Corner.TopRightCorner)
         
         # Set maximum height for tab widget to prevent excessive space
-        tab_widget.setMaximumHeight(320)
+        tab_widget.setMaximumHeight(350)
         
         layout.addWidget(tab_widget, 2)  # Give more space to Settings tab
         
@@ -850,6 +918,7 @@ class MainWindow(QMainWindow):
         if not dialog.exec():
             return False
 
+        self.clear_marker_rows()
         self.data_file = dialog.source_path
         self.imported_dataframe = dialog.normalized_dataframe
         self.reference_sites_dataframe = (
@@ -1025,6 +1094,7 @@ class MainWindow(QMainWindow):
         filename = Path(file_path).name
         file_extension = Path(file_path).suffix.lower()
         if inspected_dataframe is None:
+            self.clear_marker_rows()
             self.data_file = file_path
             self.imported_dataframe = None
             self.reference_sites_dataframe = None
@@ -1281,6 +1351,258 @@ class MainWindow(QMainWindow):
         self.generate_button.setEnabled(enabled)
         self.viewer_button.setEnabled(enabled)
 
+    @staticmethod
+    def marker_button_text_color(color):
+        return '#111111' if color.lightness() > 145 else '#ffffff'
+
+    def set_marker_button_color(self, button, color_value):
+        color = QColor(color_value)
+        if not color.isValid():
+            color = QColor(self.DEFAULT_MARKER_COLOR)
+        canonical = color.name(QColor.NameFormat.HexRgb)
+        button.setProperty('markerColor', canonical)
+        button.setText(canonical.upper())
+        button.setStyleSheet(
+            f"background-color: {canonical}; color: "
+            f"{self.marker_button_text_color(color)}; padding: 3px 6px;"
+        )
+
+    def select_marker_color(self, button):
+        current = QColor(
+            button.property('markerColor') or self.DEFAULT_MARKER_COLOR
+        )
+        color = QColorDialog.getColor(current, self, 'Select Marker Color')
+        if color.isValid():
+            self.set_marker_button_color(button, color.name())
+
+    def add_marker_row(self, marker=None):
+        marker = marker or {}
+        row = self.marker_table.rowCount()
+        self.marker_table.insertRow(row)
+
+        label_item = QTableWidgetItem(str(marker.get('label', '')))
+        label_item.setData(Qt.ItemDataRole.UserRole, marker.get('source_row'))
+        self.marker_table.setItem(row, 0, label_item)
+        self.marker_table.setItem(
+            row, 1, QTableWidgetItem(str(marker.get('latitude_text', '')))
+        )
+        self.marker_table.setItem(
+            row, 2, QTableWidgetItem(str(marker.get('longitude_text', '')))
+        )
+
+        color_button = QPushButton()
+        color_button.setToolTip('Choose this marker color')
+        self.set_marker_button_color(
+            color_button, marker.get('color', self.DEFAULT_MARKER_COLOR)
+        )
+        color_button.clicked.connect(
+            lambda _checked=False, button=color_button:
+            self.select_marker_color(button)
+        )
+        self.marker_table.setCellWidget(row, 3, color_button)
+
+        remove_button = QPushButton()
+        remove_button.setIcon(self.style().standardIcon(
+            QStyle.StandardPixmap.SP_TrashIcon
+        ))
+        remove_button.setToolTip('Remove this marker')
+        remove_button.setMaximumWidth(32)
+        remove_button.clicked.connect(
+            lambda _checked=False, button=remove_button:
+            self.remove_marker_row(button)
+        )
+        self.marker_table.setCellWidget(row, 4, remove_button)
+        self.update_marker_count()
+
+    def remove_marker_row(self, button):
+        for row in range(self.marker_table.rowCount()):
+            if self.marker_table.cellWidget(row, 4) is button:
+                self.marker_table.removeRow(row)
+                break
+        self.update_marker_count()
+
+    def clear_marker_rows(self):
+        self.marker_table.setRowCount(0)
+        self.marker_import_files = []
+        self.update_marker_count()
+
+    def update_marker_count(self):
+        count = self.marker_table.rowCount()
+        self.marker_count_label.setText(
+            f"{count} marker{'s' if count != 1 else ''}"
+        )
+
+    def browse_marker_file(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            'Import Marker List',
+            '',
+            'CSV or Excel (*.csv *.xls *.xlsx);;All Files (*)',
+        )
+        if file_path:
+            self.import_marker_file(file_path)
+
+    @staticmethod
+    def read_marker_dataframe(file_path):
+        suffix = Path(file_path).suffix.lower()
+        if suffix == '.csv':
+            return pd.read_csv(file_path)
+        if suffix == '.xlsx':
+            return pd.read_excel(file_path, engine='openpyxl')
+        if suffix == '.xls':
+            return pd.read_excel(file_path, engine='xlrd')
+        raise ValueError('Marker lists must be CSV, XLS, or XLSX files')
+
+    def import_marker_file(self, file_path):
+        try:
+            dataframe = self.read_marker_dataframe(file_path)
+            markers, warnings = self.parse_marker_dataframe(dataframe)
+        except Exception as error:
+            self.add_status_message(f"❌ Marker list import failed: {error}")
+            QMessageBox.critical(
+                self, 'Marker Import Error',
+                f"Could not import the marker list:\n\n{error}",
+            )
+            return
+
+        for marker in markers:
+            self.add_marker_row(marker)
+        if markers:
+            marker_path = str(Path(file_path))
+            if marker_path not in self.marker_import_files:
+                self.marker_import_files.append(marker_path)
+            self.add_status_message(
+                f"✅ Added {len(markers)} marker"
+                f"{'s' if len(markers) != 1 else ''} from "
+                f"{Path(file_path).name}"
+            )
+        for warning in warnings[:10]:
+            self.add_status_message(f"⚠️ Marker list {warning}")
+        if len(warnings) > 10:
+            self.add_status_message(
+                f"⚠️ Marker list: {len(warnings) - 10} additional invalid "
+                "rows were skipped"
+            )
+        if not markers:
+            QMessageBox.warning(
+                self, 'No Markers Imported',
+                'No valid marker rows were found. Review the status messages '
+                'for row-specific details.',
+            )
+
+    def marker_records_from_table(self):
+        markers = []
+        warnings = []
+        for row in range(self.marker_table.rowCount()):
+            cells = [
+                self.marker_table.item(row, column).text().strip()
+                if self.marker_table.item(row, column) else ''
+                for column in range(3)
+            ]
+            color_button = self.marker_table.cellWidget(row, 3)
+            color = (
+                color_button.property('markerColor')
+                if color_button else self.DEFAULT_MARKER_COLOR
+            )
+            if not any(cells):
+                continue
+            source_row = (
+                self.marker_table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+                if self.marker_table.item(row, 0) else None
+            )
+            try:
+                markers.append(self.normalize_marker_record(
+                    cells[0], cells[1], cells[2], color, source_row
+                ))
+            except ValueError as error:
+                warnings.append(f'Marker table row {row + 1}: {error}')
+        return markers, warnings
+
+    @staticmethod
+    def marker_cell_text(value):
+        if value is None or pd.isna(value):
+            return ''
+        return str(value).strip()
+
+    @classmethod
+    def normalize_marker_record(cls, label, latitude, longitude, color,
+                                source_row=None):
+        """Validate one marker and return its canonical in-memory shape."""
+        label_text = cls.marker_cell_text(label)
+        latitude_text = cls.marker_cell_text(latitude)
+        longitude_text = cls.marker_cell_text(longitude)
+        color_text = cls.marker_cell_text(color)
+
+        if not label_text:
+            raise ValueError('label is blank')
+        try:
+            latitude_value = float(latitude_text)
+            longitude_value = float(longitude_text)
+        except (TypeError, ValueError):
+            raise ValueError('latitude and longitude must be numbers') from None
+        if not math.isfinite(latitude_value) or not -90 <= latitude_value <= 90:
+            raise ValueError('latitude must be between -90 and 90')
+        if not math.isfinite(longitude_value) or not -180 <= longitude_value <= 180:
+            raise ValueError('longitude must be between -180 and 180')
+
+        marker_color = QColor(color_text)
+        if not color_text or not marker_color.isValid():
+            raise ValueError('color must be a name such as red or a #RRGGBB value')
+
+        return {
+            'label': label_text,
+            'latitude': latitude_value,
+            'longitude': longitude_value,
+            'latitude_text': latitude_text,
+            'longitude_text': longitude_text,
+            'color': marker_color.name(QColor.NameFormat.HexRgb),
+            'source_row': source_row,
+        }
+
+    @classmethod
+    def parse_marker_dataframe(cls, dataframe, header_row=1):
+        """Return valid markers and row-specific warnings from one marker list."""
+        normalized_columns = {
+            re.sub(r'[^a-z0-9]+', ' ', str(column).lower()).strip(): column
+            for column in dataframe.columns
+        }
+        mapped_columns = {}
+        for field, aliases in cls.MARKER_COLUMN_ALIASES.items():
+            mapped_columns[field] = next(
+                (normalized_columns[alias] for alias in aliases
+                 if alias in normalized_columns),
+                None,
+            )
+
+        missing = [
+            field.title() for field, column in mapped_columns.items()
+            if column is None
+        ]
+        if missing:
+            raise ValueError(
+                'Marker list is missing required columns: ' + ', '.join(missing)
+            )
+
+        markers = []
+        warnings = []
+        first_data_row = max(int(header_row), 1) + 1
+        for position, (_, row) in enumerate(dataframe.iterrows()):
+            values = {
+                field: row[column] for field, column in mapped_columns.items()
+            }
+            if not any(cls.marker_cell_text(value) for value in values.values()):
+                continue
+            source_row = first_data_row + position
+            try:
+                markers.append(cls.normalize_marker_record(
+                    values['label'], values['latitude'], values['longitude'],
+                    values['color'], source_row,
+                ))
+            except ValueError as error:
+                warnings.append(f'Row {source_row}: {error}')
+
+        return markers, warnings
+
     def generate_kml(self, open_viewer=False):
         """Generate output files in background thread"""
         if self.kml_generator and self.kml_generator.isRunning():
@@ -1298,6 +1620,7 @@ class MainWindow(QMainWindow):
         else:
             data_type = "Location Point"
 
+        markers, marker_warnings = self.marker_records_from_table()
         self.open_viewer_after_generation = open_viewer
         
         # Collect settings
@@ -1348,9 +1671,13 @@ class MainWindow(QMainWindow):
         
         self.add_status_message(f"Starting KML and GeoJSON generation for {data_type} data...")
         self.generation_messages = []
+        for warning in marker_warnings:
+            self.handle_generation_status(f"⚠️ {warning}; marker skipped")
         self.current_generation_settings = settings.copy()
         self.current_generation_type = data_type
         self.current_generation_source_file = self.data_file
+        self.current_generation_marker_count = len(markers)
+        self.current_marker_import_files = list(self.marker_import_files)
         self.current_import_metadata = None
         if self.import_metadata:
             self.current_import_metadata = {
@@ -1369,6 +1696,7 @@ class MainWindow(QMainWindow):
             settings,
             dataframe=self.imported_dataframe,
             reference_sites=self.reference_sites_dataframe,
+            markers=markers,
         )
         self.kml_generator.progress.connect(self.progress_bar.setValue)
         self.kml_generator.finished.connect(self.on_generation_finished)
@@ -1695,6 +2023,26 @@ class MainWindow(QMainWindow):
 
         lines.extend([
             "",
+            "Markers",
+            f"Marker rows accepted: {self.current_generation_marker_count}",
+            f"Static markers generated: {summary.get('markers_generated', 0)}",
+            f"Marker list files imported: {len(self.current_marker_import_files)}",
+        ])
+        for marker_file_index, marker_file_value in enumerate(
+            self.current_marker_import_files, 1
+        ):
+            marker_file_path = Path(marker_file_value)
+            marker_file_hash = (
+                self.calculate_file_sha256(marker_file_path)
+                if marker_file_path.is_file() else 'Unavailable'
+            )
+            lines.extend([
+                f"Marker list {marker_file_index}: {marker_file_path.name}",
+                f"Marker list {marker_file_index} SHA-256: {marker_file_hash}",
+            ])
+
+        lines.extend([
+            "",
             "Visualization settings",
             f"Leg length (miles): {settings.get('leg_length')}",
             f"Shaded area length (miles): {settings.get('shaded_area_length')}",
@@ -1772,6 +2120,9 @@ class MainWindow(QMainWindow):
         # Point Location template
         gps_action = menu.addAction("📌 Location Point Template")
         gps_action.triggered.connect(lambda: self.download_template("gps"))
+
+        marker_action = menu.addAction("📍 Markers Template")
+        marker_action.triggered.connect(lambda: self.download_template("markers"))
         
         # Show menu below the button
         menu.exec(self.template_button.mapToGlobal(self.template_button.rect().bottomLeft()))
@@ -1834,6 +2185,17 @@ class MainWindow(QMainWindow):
                     [datetime(2024, 1, 15, 14, 9, 0), 43.167541, -77.590212, 150]
                 ],
                 "description": "Location Point Template"
+            },
+
+            "markers": {
+                "filename": "markers_template.xlsx",
+                "headers": ["Label", "Latitude", "Longitude", "Color"],
+                "sample_data": [
+                    ["Residence", 43.15831, -77.60938, "red"],
+                    ["Office", 43.15400, -77.61390, "blue"],
+                    ["Meeting Point", 43.16109, -77.65102, "orange"],
+                ],
+                "description": "Markers Template"
             }
         }
         
@@ -1866,12 +2228,15 @@ class MainWindow(QMainWindow):
                     cell.font = header_font
                 
                 # Write sample data
-                timestamp_col = template['headers'].index('Timestamp') + 1  # 1-based
+                timestamp_col = (
+                    template['headers'].index('Timestamp') + 1
+                    if 'Timestamp' in template['headers'] else None
+                )
                 for row_idx, row_data in enumerate(template['sample_data'], 2):
                     for col_idx, value in enumerate(row_data, 1):
                         cell = ws.cell(row=row_idx, column=col_idx, value=value)
                         # Format timestamp column to show seconds
-                        if col_idx == timestamp_col:
+                        if timestamp_col and col_idx == timestamp_col:
                             cell.number_format = 'YYYY-MM-DD HH:MM:SS'
                 
                 # Auto-fit column widths
@@ -1881,6 +2246,8 @@ class MainWindow(QMainWindow):
                         ws.column_dimensions[chr(64 + col_idx)].width = 22
                     elif header in ('Latitude', 'Longitude'):
                         ws.column_dimensions[chr(64 + col_idx)].width = 14
+                    elif header == 'Label':
+                        ws.column_dimensions[chr(64 + col_idx)].width = 24
                     else:
                         ws.column_dimensions[chr(64 + col_idx)].width = 12
                 
@@ -1892,6 +2259,11 @@ class MainWindow(QMainWindow):
                 self.open_file_location(output_file)
                 
                 # Show info about the template
+                format_note = (
+                    "Timestamp column pre-formatted to show seconds (HH:MM:SS)"
+                    if timestamp_col else
+                    "Named colors or #RRGGBB color values"
+                )
                 QMessageBox.information(
                     self,
                     "Template Downloaded",
@@ -1899,7 +2271,7 @@ class MainWindow(QMainWindow):
                     f"The template includes:\n"
                     f"• Required column headers: {', '.join(template['headers'])}\n"
                     f"• Sample data rows to show the expected format\n"
-                    f"• Timestamp column pre-formatted to show seconds (HH:MM:SS)\n\n"
+                    f"• {format_note}\n\n"
                     f"Replace the sample data with your own data and save. "
                     f"You can also load this sample file directly to see how the visualizer works."
                 )

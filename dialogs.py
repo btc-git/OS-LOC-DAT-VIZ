@@ -74,7 +74,7 @@ class DisclaimerDialog(QDialog):
 <ol>
     <li>Drag and drop a CSV or Excel file into the program, or use the <strong>Browse for File</strong> button. Standard template files are recognized automatically.</li>
     <li>If the headers do not match a standard template, the mapping wizard opens automatically. Select the worksheet and header row, choose the record type, and verify each suggested column mapping.</li>
-    <li>Review the timezone, slash/dash date order, units, visualization settings, and optional label.</li>
+    <li>Review the timezone, slash/dash date order, units, visualization settings, and optional label. Add or import coordinate-only context markers on the <strong>Markers</strong> tab when needed.</li>
     <li>Click <strong>Generate</strong> to create same-named KML, GeoJSON, and TXT generation-log files.</li>
     <li>Review the log’s settings, hashes, row outcomes, and warnings before opening the KML in Google Earth Pro or using the GeoJSON in another compatible GIS application.</li>
 </ol>
@@ -84,6 +84,7 @@ class DisclaimerDialog(QDialog):
     <li>If your data includes tower and sector information, the tool will draw a wedge shape to show the general direction. If no azimuth is provided, it will draw a circle. The default wedge is set to a 120° angle and a 1 mile shaded area, but this is for visualization only and does not reflect coverage.</li>
     <li>If your data includes a distance from the tower, the tool will draw a band at that distance with configurable inner and outer thickness. This depicts the source-reported or inferred distance and any user-selected band extensions. It does not establish that the device was within the displayed area or at an exact distance from the tower.</li>
     <li>For location point data, the tool will draw a circle to represent the point and its accuracy, using either the provided accuracy or a default value of 100 meters.</li>
+    <li>User markers are exported as a separate static record set with individual colors, labels, coordinates, and independent controls. They apply only to the current source record set.</li>
 </ul>
 
 <h3 style='color: #feca57; margin-top: 25px;'>🛠️ Technical Guidance</h3>

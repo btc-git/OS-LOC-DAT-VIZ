@@ -4,7 +4,7 @@
  */
 
 const PLUGIN_ID = "osloc-dat-viz-viewer";
-const PLUGIN_VERSION = "0.0.46";
+const PLUGIN_VERSION = "0.0.47";
 const PANEL_ID = "osloc-dat-viz-panel";
 const DETAILS_ID = "osloc-dat-viz-details";
 const LABEL_SOURCE_ID = "osloc-dat-viz-time-labels-source";
@@ -456,6 +456,10 @@ export function sharedPointVisibilityFilter() {
     ["all",
       ["==", ["get", "osloc_event_type"], "reference_site"],
       ["==", ["get", "osloc_component_type"], "reference_site"]
+    ],
+    ["all",
+      ["==", ["get", "osloc_event_type"], "marker"],
+      ["==", ["get", "osloc_component_type"], "marker"]
     ]
   ];
 }
@@ -499,6 +503,10 @@ function featureColorExpression(property, fallback) {
   return ["coalesce", ["get", property], fallback];
 }
 
+export function markerColorExpression(fallback = "#e53935") {
+  return featureColorExpression("osloc_style_marker_color_rgba", fallback);
+}
+
 function pluginEvidenceLayerDefinitions(group) {
   const ids = evidenceLayerIds(group.key);
   const source = { source: group.sourceId };
@@ -535,6 +543,7 @@ function pluginEvidenceLayerDefinitions(group) {
     "osloc_style_reference_color_rgba",
     palette.referenceSite
   );
+  const markerColor = markerColorExpression();
 
   return [
     {
@@ -587,10 +596,12 @@ function pluginEvidenceLayerDefinitions(group) {
         "circle-color": ["case",
           ["==", ["get", "osloc_event_type"], "distance_only"], distanceCenter,
           ["==", ["get", "osloc_event_type"], "reference_site"], referenceSite,
+          ["==", ["get", "osloc_event_type"], "marker"], markerColor,
           gpsLine
         ],
         "circle-radius": ["case",
           ["==", ["get", "osloc_event_type"], "reference_site"], 5,
+          ["==", ["get", "osloc_event_type"], "marker"], 6,
           4
         ],
         "circle-stroke-width": 1,
@@ -848,6 +859,7 @@ function applySharedLayerStyling() {
     if (!layer) continue;
 
     const palette = stylePaletteForLayer(map, layer);
+    const markerColor = markerColorExpression();
     const type = String(layer.type || "");
 
     if (type === "fill") {
@@ -904,10 +916,12 @@ function applySharedLayerStyling() {
         map.setPaintProperty?.(layerId, "circle-color", ["case",
           ["==", ["get", "osloc_event_type"], "distance_only"], palette.distanceCenter,
           ["==", ["get", "osloc_event_type"], "reference_site"], palette.referenceSite,
+          ["==", ["get", "osloc_event_type"], "marker"], markerColor,
           palette.gpsLine
         ]);
         map.setPaintProperty?.(layerId, "circle-radius", ["case",
           ["==", ["get", "osloc_event_type"], "reference_site"], 5,
+          ["==", ["get", "osloc_event_type"], "marker"], 6,
           4
         ]);
         map.setPaintProperty?.(layerId, "circle-stroke-width", 1);
@@ -921,7 +935,7 @@ function applySharedLayerStyling() {
       // semantics explicitly require visible points.
       const componentFilter = anyEqualsExpr(
         "osloc_component_type",
-        [...SHARED_FILL_COMPONENTS, ...SHARED_LINE_COMPONENTS, "center_point", "location_point", "reference_site"]
+        [...SHARED_FILL_COMPONENTS, ...SHARED_LINE_COMPONENTS, "center_point", "location_point", "reference_site", "marker"]
       );
       state.sharedNativeLayerBaseFilter.set(
         layerId,
@@ -942,11 +956,16 @@ function applySharedLayerStyling() {
             ["==", ["get", "osloc_event_type"], "reference_site"],
             ["==", ["get", "osloc_component_type"], "reference_site"]
           ], 1,
+          ["all",
+            ["==", ["get", "osloc_event_type"], "marker"],
+            ["==", ["get", "osloc_component_type"], "marker"]
+          ], 1,
           0
         ]);
         map.setPaintProperty?.(layerId, "icon-color", ["case",
           ["==", ["get", "osloc_event_type"], "distance_only"], palette.distanceCenter,
           ["==", ["get", "osloc_event_type"], "reference_site"], palette.referenceSite,
+          ["==", ["get", "osloc_event_type"], "marker"], markerColor,
           palette.gpsLine
         ]);
       } catch { }
@@ -1391,7 +1410,7 @@ function inferLabel(event) {
   return event.id;
 }
 
-function humanizeEventType(value) {
+export function humanizeEventType(value) {
   const known = {
     tower_sector: "Tower sector",
     tower_sector_distance: "Tower sector + distance",
@@ -1399,6 +1418,7 @@ function humanizeEventType(value) {
     distance_only: "Distance only",
     location_accuracy: "Location + accuracy",
     location: "Location",
+    marker: "Marker",
   };
 
   if (known[value]) return known[value];
@@ -1793,9 +1813,15 @@ function eventTimeLabelAnchor(event) {
     : null;
 }
 
-function formatMapTimeLabel(event) {
+export function formatMapTimeLabel(event) {
+  if (event?.eventType === "marker") return inferLabel(event);
   if (!isTemporalEvent(event)) return "";
   return formatCorrectedDisplayTime(event) || inferLabel(event);
+}
+
+export function eventUsesMapLabel(event, temporalLabelsEnabled = true) {
+  return event?.eventType === "marker" ||
+    (temporalLabelsEnabled && isTemporalEvent(event));
 }
 
 function ensureMapLabelLayer() {
@@ -1838,7 +1864,7 @@ function ensureMapLabelLayer() {
           "text-offset": [0, 0],
           "text-allow-overlap": true,
           "text-ignore-placement": true,
-          "visibility": state.labelsEnabled ? "visible" : "none",
+          "visibility": "visible",
         },
         paint: commonPaint,
       });
@@ -1857,7 +1883,7 @@ function ensureMapLabelLayer() {
           "text-offset": [0.75, 0],
           "text-allow-overlap": true,
           "text-ignore-placement": true,
-          "visibility": state.labelsEnabled ? "visible" : "none",
+          "visibility": "visible",
         },
         paint: commonPaint,
       });
@@ -1874,33 +1900,11 @@ function updateMapLabels() {
   const map = state.app?.getMap?.();
   if (!map) return;
 
-  if (!state.labelsEnabled) {
-    if (state.labelLayersVisible) {
-      try {
-        map.setLayoutProperty?.(LABEL_INSIDE_LAYER_ID, "visibility", "none");
-        map.setLayoutProperty?.(LABEL_POINT_LAYER_ID, "visibility", "none");
-      } catch { }
-      state.labelLayersVisible = false;
-    }
-
-    if (!state.labelsLastEmpty) {
-      const disabledSource = map.getSource?.(LABEL_SOURCE_ID);
-      if (disabledSource?.setData) {
-        try {
-          disabledSource.setData({ type: "FeatureCollection", features: [] });
-        } catch { }
-      }
-      state.labelsLastEmpty = true;
-      state.lastLabelSignature = "disabled";
-    }
-    return;
-  }
-
-  const visibleTemporalEvents = state.events.filter(event =>
-    isTemporalEvent(event) && shouldShow(event)
+  const visibleLabelEvents = state.events.filter(event =>
+    eventUsesMapLabel(event, state.labelsEnabled) && shouldShow(event)
   );
 
-  if (!visibleTemporalEvents.length) {
+  if (!visibleLabelEvents.length) {
     if (state.labelLayersVisible) {
       try {
         map.setLayoutProperty?.(LABEL_INSIDE_LAYER_ID, "visibility", "none");
@@ -1930,7 +1934,7 @@ function updateMapLabels() {
   const features = [];
   const signatureParts = [];
 
-  for (const event of visibleTemporalEvents) {
+  for (const event of visibleLabelEvents) {
     const anchor = eventTimeLabelAnchor(event);
     if (!anchor) continue;
 
@@ -1973,7 +1977,7 @@ function updateMapLabels() {
     state.labelsLastEmpty = features.length === 0;
     state.lastLabelSignature = newLabelSignature;
   } catch (err) {
-    console.warn("[OSLOC] Could not update time labels", err);
+    console.warn("[OSLOC] Could not update map labels", err);
   }
 }
 
@@ -3689,7 +3693,7 @@ function showEventDetails(event, sourceFeature = null) {
         );
       } else if (referenceRows) {
         add(referenceRows.label, referenceRows.value);
-      } else if (event.eventType !== "reference_site") {
+      } else if (!["reference_site", "marker"].includes(event.eventType)) {
         add("Timing", "Static / non-temporal");
       }
 
@@ -3854,7 +3858,7 @@ function makeEventRow(event) {
       provenance.textContent = `${referenceRows.label}: ${referenceRows.value}`;
       body.append(provenance);
     }
-  } else {
+  } else if (event.eventType !== "marker") {
     const staticLabel = document.createElement("span");
     staticLabel.textContent = "Static / non-temporal";
     body.append(staticLabel);
@@ -3947,15 +3951,15 @@ function renderEventList(events, labelText = "") {
 function makeLabelsControl() {
   const wrap = document.createElement("label");
   wrap.className = "osloc-v028__labels-control";
-  wrap.title = "Show adjusted event times on the map.";
+  wrap.title = "Show adjusted event times on the map. Marker labels remain visible.";
 
   const checkbox = document.createElement("input");
   checkbox.type = "checkbox";
   checkbox.checked = state.labelsEnabled;
-  checkbox.setAttribute("aria-label", "Show times on map");
+  checkbox.setAttribute("aria-label", "Show event times on map");
 
   const text = document.createElement("span");
-  text.textContent = "Show times on map";
+  text.textContent = "Show event times";
 
   checkbox.addEventListener("change", () => {
     state.labelsEnabled = checkbox.checked;

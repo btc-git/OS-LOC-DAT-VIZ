@@ -33,6 +33,7 @@ EVENT_TYPES = {
     'location': 'location',
     'location_accuracy': 'location_accuracy',
     'reference_site': 'reference_site',
+    'marker': 'marker',
 }
 
 COMPONENT_TYPES = {
@@ -46,6 +47,7 @@ COMPONENT_TYPES = {
     'accuracy_circle': 'accuracy_circle',
     'location_point': 'location_point',
     'reference_site': 'reference_site',
+    'marker': 'marker',
 }
 
 
@@ -57,13 +59,14 @@ class KMLGenerator(QThread):
     status_message = pyqtSignal(str)  # status messages for console
     
     def __init__(self, data_file, data_type, settings, dataframe=None,
-                 reference_sites=None):
+                 reference_sites=None, markers=None):
         super().__init__()
         self.data_file = data_file
         self.data_type = data_type
         self.settings = settings
         self.dataframe = dataframe
         self.reference_sites = reference_sites
+        self.markers = list(markers or [])
         self.audit_summary = {}
         self.export_metadata = None
         self._reference_site_cache_key = None
@@ -112,6 +115,18 @@ class KMLGenerator(QThread):
         red = int(color[6:8], 16)
         alpha_text = f"{alpha / 255:.3f}".rstrip('0').rstrip('.')
         return f"rgba({red}, {green}, {blue}, {alpha_text})"
+
+    @staticmethod
+    def css_hex_to_kml_color(value):
+        """Convert #RRGGBB marker colors to opaque KML AABBGGRR text."""
+        match = re.fullmatch(r'#?([0-9a-fA-F]{6})', str(value or '').strip())
+        if not match:
+            raise ValueError(f"Invalid marker color: {value}")
+        red_green_blue = match.group(1).lower()
+        return (
+            'ff' + red_green_blue[4:6] + red_green_blue[2:4]
+            + red_green_blue[0:2]
+        )
 
     @staticmethod
     def iso_timestamp_to_epoch_ms(value):
@@ -212,6 +227,20 @@ class KMLGenerator(QThread):
             'osloc_schema_version': OSLOC_SCHEMA_VERSION,
             'osloc_dataset_id': str(reference_id),
             'osloc_dataset_name': reference_name,
+        }
+
+    def marker_dataset_metadata(self, dataset_name):
+        """Return a stable auxiliary dataset identity for user markers."""
+        if not self.export_metadata:
+            self.begin_export(dataset_name)
+        marker_name = f"{dataset_name} - Markers"
+        marker_id = uuid5(
+            UUID(self.export_metadata['osloc_dataset_id']), 'markers'
+        )
+        return {
+            'osloc_schema_version': OSLOC_SCHEMA_VERSION,
+            'osloc_dataset_id': str(marker_id),
+            'osloc_dataset_name': marker_name,
         }
 
     def maybe_flatten_event_fragment(self, fragment):
@@ -894,6 +923,85 @@ class KMLGenerator(QThread):
         fragment = self.create_reference_site_folder(records, dataset_name)
         return self.geojson_features_from_event_fragment(fragment, {})
 
+    def create_marker_placemark(self, marker, position, dataset_name):
+        marker_metadata = self.marker_dataset_metadata(dataset_name)
+        title = str(marker['label']).strip()
+        latitude_text = str(marker.get(
+            'latitude_text', self.format_source_coord(marker['latitude'])
+        )).strip()
+        longitude_text = str(marker.get(
+            'longitude_text', self.format_source_coord(marker['longitude'])
+        )).strip()
+        coordinate_text = f"{latitude_text}, {longitude_text}"
+        marker_color = self.css_hex_to_kml_color(marker['color'])
+        description = self.build_description_table([
+            ('Label', title),
+            ('Coordinates', coordinate_text),
+            ('Marker List Row', marker.get('source_row')),
+        ])
+        values = [
+            *marker_metadata.items(),
+            ('osloc_event_id', f"marker_{position + 1:06d}"),
+            ('osloc_event_label', title),
+            ('osloc_event_type', EVENT_TYPES['marker']),
+            ('osloc_component_type', COMPONENT_TYPES['marker']),
+            ('osloc_marker_source_row', marker.get('source_row')),
+            ('osloc_source_latitude', latitude_text),
+            ('osloc_source_longitude', longitude_text),
+            ('osloc_source_coordinate_text', coordinate_text),
+            ('osloc_style_marker_color', marker_color),
+            (
+                'osloc_style_marker_color_rgba',
+                self.kml_color_to_css_rgba(marker_color),
+            ),
+        ]
+        extended_data = self.create_data_element_block(values, '            ')
+        marker_style = textwrap.dedent(f'''\
+                <Style>
+{self.create_balloon_style('                    ')}                    <IconStyle>
+                        <scale>1</scale>
+                        <color>{marker_color}</color>
+                        <Icon><href>http://maps.google.com/mapfiles/kml/pushpin/wht-pushpin.png</href></Icon>
+                    </IconStyle>
+                    <LabelStyle><color>ffffffff</color><scale>0.9</scale></LabelStyle>
+                </Style>
+        ''')
+        return textwrap.dedent(f'''\
+            <Placemark>
+                <name>{xml_escape(title)}</name>
+                <description><![CDATA[{description}]]></description>
+                <Snippet maxLines="0"></Snippet>
+{extended_data}{marker_style}                <Point>
+                    <coordinates>{self.format_source_coord_triplet(longitude_text, latitude_text)}</coordinates>
+                </Point>
+            </Placemark>
+        ''')
+
+    def create_marker_folder(self, dataset_name):
+        if not self.markers:
+            return ""
+        placemarks = ''.join(
+            self.create_marker_placemark(marker, position, dataset_name)
+            for position, marker in enumerate(self.markers)
+        )
+        marker_name = self.marker_dataset_metadata(dataset_name)[
+            'osloc_dataset_name'
+        ]
+        return self.wrap_dataset_folder(marker_name, placemarks)
+
+    def marker_geojson_features(self, dataset_name):
+        fragment = self.create_marker_folder(dataset_name)
+        return self.geojson_features_from_event_fragment(fragment, {})
+
+    def report_marker_summary(self):
+        marker_count = len(self.markers)
+        self.audit_summary['markers_generated'] = marker_count
+        if marker_count:
+            self.status_message.emit(
+                f"📍 Markers: generated {marker_count} static "
+                f"marker{'s' if marker_count != 1 else ''}"
+            )
+
     def calculate_sector_area_sq_miles(self, radius_miles, sector_width_degrees):
         """Calculate sector area in square miles."""
         radius = max(float(radius_miles), 0.0)
@@ -999,7 +1107,9 @@ class KMLGenerator(QThread):
             else placemarks
         )
         reference_body = self.create_reference_site_folder(df, dataset_name)
-        return kml_header + body + reference_body + kml_footer
+        marker_body = self.create_marker_folder(dataset_name)
+        self.report_marker_summary()
+        return kml_header + body + reference_body + marker_body + kml_footer
     
     def generate_distance_from_tower_kml(self, df):
         """Generate KML for distance from tower data with arc visualization"""
@@ -1128,7 +1238,9 @@ class KMLGenerator(QThread):
             else placemarks
         )
         reference_body = self.create_reference_site_folder(df, dataset_name)
-        return kml_header + body + reference_body + kml_footer
+        marker_body = self.create_marker_folder(dataset_name)
+        self.report_marker_summary()
+        return kml_header + body + reference_body + marker_body + kml_footer
     
     def generate_gps_kml(self, df):
         """Generate KML for location point data"""
@@ -1228,7 +1340,9 @@ class KMLGenerator(QThread):
             if self.use_flattened_event_output()
             else placemarks
         )
-        return kml_header + body + kml_footer
+        marker_body = self.create_marker_folder(dataset_name)
+        self.report_marker_summary()
+        return kml_header + body + marker_body + kml_footer
     
     def convert_gps_accuracy_to_miles(self, accuracy_value, units):
         """Convert location point accuracy from various units to miles"""
@@ -2164,6 +2278,7 @@ class KMLGenerator(QThread):
                 continue
 
         features.extend(self.reference_site_geojson_features(df, dataset_name))
+        features.extend(self.marker_geojson_features(dataset_name))
         return self.create_geojson_collection(dataset_name, features)
 
     def generate_distance_from_tower_geojson(self, df):
@@ -2237,6 +2352,7 @@ class KMLGenerator(QThread):
                 continue
 
         features.extend(self.reference_site_geojson_features(df, dataset_name))
+        features.extend(self.marker_geojson_features(dataset_name))
         return self.create_geojson_collection(dataset_name, features)
 
     def generate_gps_geojson(self, df):
@@ -2291,6 +2407,7 @@ class KMLGenerator(QThread):
             except TimestampResolutionError:
                 continue
 
+        features.extend(self.marker_geojson_features(dataset_name))
         return self.create_geojson_collection(dataset_name, features)
 
     def source_coord_pair_text(self, lat, lon, lat_source_text=None,

@@ -14,6 +14,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, call, patch
 
+import pandas as pd
+from openpyxl import load_workbook
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtCore import QTimer
@@ -293,6 +296,53 @@ class GeoLibreProcessTests(unittest.TestCase):
 
 
 class GenerationActionTests(unittest.TestCase):
+    def test_marker_dataframe_accepts_named_and_hex_colors(self):
+        markers, warnings = MainWindow.parse_marker_dataframe(pd.DataFrame([
+            {
+                "Marker Label": "Residence",
+                "Lat": "43.158310",
+                "Lon": "-77.609380",
+                "Marker Color": "orange",
+            },
+            {
+                "Marker Label": "Meeting point",
+                "Lat": 43.2,
+                "Lon": -77.7,
+                "Marker Color": "#3366CC",
+            },
+        ]))
+
+        self.assertEqual([], warnings)
+        self.assertEqual(2, len(markers))
+        self.assertEqual("Residence", markers[0]["label"])
+        self.assertEqual("43.158310", markers[0]["latitude_text"])
+        self.assertEqual("#ffa500", markers[0]["color"])
+        self.assertEqual("#3366cc", markers[1]["color"])
+        self.assertEqual([2, 3], [marker["source_row"] for marker in markers])
+
+    def test_marker_dataframe_skips_invalid_rows_with_warnings(self):
+        markers, warnings = MainWindow.parse_marker_dataframe(pd.DataFrame([
+            {"Label": "Valid", "Latitude": 43.1, "Longitude": -77.1,
+             "Color": "green"},
+            {"Label": "", "Latitude": 43.2, "Longitude": -77.2,
+             "Color": "blue"},
+            {"Label": "Bad coordinate", "Latitude": 95,
+             "Longitude": -77.3, "Color": "purple"},
+            {"Label": "Bad color", "Latitude": 43.4,
+             "Longitude": -77.4, "Color": "chartreuse-ish"},
+            {"Label": None, "Latitude": None, "Longitude": None,
+             "Color": None},
+        ], dtype=object), header_row=3)
+
+        self.assertEqual(["Valid"], [marker["label"] for marker in markers])
+        self.assertEqual(3, len(warnings))
+        self.assertIn("Row 5: label is blank", warnings)
+        self.assertIn("Row 6: latitude must be between -90 and 90", warnings)
+        self.assertTrue(any(
+            warning.startswith("Row 7: color must be a name")
+            for warning in warnings
+        ))
+
     @classmethod
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
@@ -362,6 +412,12 @@ class GenerationActionTests(unittest.TestCase):
         window.tower_radio.setChecked(True)
         window.reference_site_radius_spinbox.setValue(15.0)
         window.reference_site_color = "ff332211"
+        window.add_marker_row({
+            "label": "Office",
+            "latitude_text": "43.123400",
+            "longitude_text": "-77.567800",
+            "color": "orange",
+        })
 
         window.generate_kml()
 
@@ -371,6 +427,10 @@ class GenerationActionTests(unittest.TestCase):
         self.assertEqual(15.0, settings["reference_site_radius_miles"])
         self.assertEqual("ff332211", settings["reference_site_color"])
         self.assertIs(reference_sites, arguments.kwargs["reference_sites"])
+        self.assertEqual("Office", arguments.kwargs["markers"][0]["label"])
+        self.assertEqual(
+            "#ffa500", arguments.kwargs["markers"][0]["color"]
+        )
         generator_class.return_value.start.assert_called_once_with()
 
     def test_license_dialog_includes_bundled_geolibre_notice(self):
@@ -416,6 +476,105 @@ class GenerationActionTests(unittest.TestCase):
         )
         self.assertIn("US Eastern", window.target_timezone_combo.currentText())
         self.assertEqual("YMD", window.source_date_order_combo.currentData())
+
+    def test_markers_tab_collects_manual_rows_and_colors(self):
+        with patch.object(MainWindow, "show_disclaimer_dialog"):
+            window = MainWindow()
+        self.addCleanup(window.close)
+
+        self.assertEqual(
+            ["Data Type", "Settings", "Colors", "Markers"],
+            [
+                window.tab_widget.tabText(index)
+                for index in range(window.tab_widget.count())
+            ],
+        )
+
+        window.add_marker_row()
+        window.marker_table.item(0, 0).setText("Court")
+        window.marker_table.item(0, 1).setText("43.158310")
+        window.marker_table.item(0, 2).setText("-77.609380")
+        window.set_marker_button_color(
+            window.marker_table.cellWidget(0, 3), "blue"
+        )
+
+        markers, warnings = window.marker_records_from_table()
+
+        self.assertEqual([], warnings)
+        self.assertEqual(1, len(markers))
+        self.assertEqual("Court", markers[0]["label"])
+        self.assertEqual("43.158310", markers[0]["latitude_text"])
+        self.assertEqual("#0000ff", markers[0]["color"])
+        self.assertEqual("1 marker", window.marker_count_label.text())
+
+    def test_marker_file_import_appends_valid_rows(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            marker_path = Path(temporary_directory) / "markers.csv"
+            marker_path.write_text(
+                "Label,Latitude,Longitude,Color\n"
+                "Office,43.10,-77.10,red\n"
+                "Invalid,100,-77.20,green\n",
+                encoding="utf-8",
+            )
+            with patch.object(MainWindow, "show_disclaimer_dialog"):
+                window = MainWindow()
+            self.addCleanup(window.close)
+
+            window.add_marker_row({
+                "label": "Existing",
+                "latitude_text": "43.0",
+                "longitude_text": "-77.0",
+                "color": "black",
+            })
+            window.import_marker_file(str(marker_path))
+
+            self.assertEqual(2, window.marker_table.rowCount())
+            self.assertEqual("Office", window.marker_table.item(1, 0).text())
+            self.assertEqual([str(marker_path)], window.marker_import_files)
+            self.assertIn("Marker list Row 3", window.status_text.toPlainText())
+
+    def test_markers_template_has_coordinate_and_color_columns(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            template_path = Path(temporary_directory) / "markers.xlsx"
+            with patch.object(MainWindow, "show_disclaimer_dialog"):
+                window = MainWindow()
+            self.addCleanup(window.close)
+
+            with (
+                patch("main_window.QFileDialog.getSaveFileName", return_value=(
+                    str(template_path), "Excel Files (*.xlsx)"
+                )),
+                patch.object(window, "open_file_location"),
+                patch("main_window.QMessageBox.information"),
+            ):
+                window.download_template("markers")
+
+            workbook = load_workbook(template_path, read_only=True)
+            worksheet = workbook.active
+            self.assertEqual(
+                ["Label", "Latitude", "Longitude", "Color"],
+                [cell.value for cell in worksheet[1]],
+            )
+            self.assertEqual("red", worksheet[2][3].value)
+            workbook.close()
+
+    def test_selecting_source_clears_markers_even_for_same_path(self):
+        with patch.object(MainWindow, "show_disclaimer_dialog"):
+            window = MainWindow()
+        self.addCleanup(window.close)
+        window.data_file = "records.csv"
+        window.add_marker_row({
+            "label": "Temporary",
+            "latitude_text": "43.0",
+            "longitude_text": "-77.0",
+            "color": "black",
+        })
+
+        with patch.object(window, "start_file_inspection"):
+            window.handle_file_selection("records.csv")
+
+        self.assertEqual(0, window.marker_table.rowCount())
+        self.assertEqual([], window.marker_import_files)
 
         window.apply_import_timestamp_settings(SimpleNamespace(
             selected_source_timezone_name=None,
@@ -555,9 +714,11 @@ class GenerationActionTests(unittest.TestCase):
             root = Path(temporary_directory)
             source_path = root / "records.csv"
             cell_site_path = root / "cell_sites.csv"
+            marker_path = root / "markers.csv"
             output_path = root / "result.kml"
             source_path.write_text("records\n", encoding="utf-8")
             cell_site_path.write_text("cell sites\n", encoding="utf-8")
+            marker_path.write_text("markers\n", encoding="utf-8")
             output_path.write_text("<kml/>\n", encoding="utf-8")
             output_path.with_suffix(".geojson").write_text(
                 '{"type":"FeatureCollection","features":[]}\n',
@@ -574,6 +735,8 @@ class GenerationActionTests(unittest.TestCase):
                 "reference_site_color": "ff000000",
             }
             window.current_generation_type = "Distance from Tower"
+            window.current_generation_marker_count = 3
+            window.current_marker_import_files = [str(marker_path)]
             window.current_import_metadata = {
                 "worksheet": None,
                 "header_row": 1,
@@ -630,6 +793,7 @@ class GenerationActionTests(unittest.TestCase):
                 "reference_site_source": "cell site list",
                 "reference_sites_considered": 12,
                 "reference_sites_generated": 5,
+                "markers_generated": 3,
             })
 
             log_text = window.build_generation_log(output_path)
@@ -667,6 +831,13 @@ class GenerationActionTests(unittest.TestCase):
             self.assertIn("Reference site source: cell site list", log_text)
             self.assertIn("Reference sites considered: 12", log_text)
             self.assertIn("Static reference sites generated: 5", log_text)
+            self.assertIn("Marker rows accepted: 3", log_text)
+            self.assertIn("Static markers generated: 3", log_text)
+            self.assertIn("Marker list 1: markers.csv", log_text)
+            self.assertIn(
+                f"Marker list 1 SHA-256: {window.calculate_file_sha256(marker_path)}",
+                log_text,
+            )
 
 
 if __name__ == "__main__":
