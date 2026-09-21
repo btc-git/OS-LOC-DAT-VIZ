@@ -129,6 +129,27 @@ class KMLTemporalMetadataTests(unittest.TestCase):
         if 'osloc_event_label' in metadata:
             self.assertTrue(metadata['osloc_event_label'])
 
+    def test_distance_generation_accepts_numeric_text_from_excel_import(self):
+        dataframe = pd.DataFrame([{
+            'Timestamp': '2024-01-15 14:00:00',
+            'Latitude': '43.162849',
+            'Longitude': '-77.574150',
+            'Azimuth': '62',
+            'Distance': '0.63',
+        }])
+        generator = KMLGenerator(
+            '', 'Distance from Tower', generator_settings()
+        )
+
+        kml_content = generator.generate_distance_from_tower_kml(dataframe)
+        geojson_content = generator.generate_distance_from_tower_geojson(
+            dataframe
+        )
+
+        self.assertIn('<Polygon>', kml_content)
+        self.assertIn('43.162849', kml_content)
+        self.assertIn('"FeatureCollection"', geojson_content)
+
     def test_ambiguous_numeric_dash_dates_use_selected_order(self):
         mdy_generator = KMLGenerator('', 'Tower/Sector', generator_settings())
         dmy_settings = generator_settings()

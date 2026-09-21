@@ -559,8 +559,8 @@ class GenerationActionTests(unittest.TestCase):
                     "file_name": cell_site_path.name,
                     "worksheet": None,
                     "header_row": 1,
-                    "policy": "cell_site_first_fallback_original",
-                    "policy_label": "Cell site list first; use original records when a value is missing",
+                    "policy": "cell_site_only",
+                    "policy_label": "Cell site list only; unmatched values remain blank",
                     "original_key_mappings": {
                         "Site ID": "Start_eNodeB",
                         "Sector ID": "Start_Sector",
@@ -575,6 +575,9 @@ class GenerationActionTests(unittest.TestCase):
                     "input_rows": 1,
                     "cell_site_rows": 1,
                     "cell_site_rows_ignored_missing_key": 0,
+                    "duplicate_keys_collapsed": 2,
+                    "duplicate_rows_collapsed": 3,
+                    "unreferenced_conflicting_keys_ignored": 1,
                     "matched_rows": 1,
                     "unmatched_rows": 0,
                     "unmatched_source_rows": [],
@@ -606,12 +609,24 @@ class GenerationActionTests(unittest.TestCase):
 
             self.assertIn("Cell site list file: cell_sites.csv", log_text)
             self.assertIn(
+                "Tower field source: Cell site list only; unmatched values remain blank",
+                log_text,
+            )
+            self.assertIn(
                 f"Cell site list SHA-256: {expected_cell_site_hash}",
                 log_text,
             )
             self.assertIn("Site ID: Start_eNodeB", log_text)
             self.assertIn("Site ID: E/G NodeB ID", log_text)
             self.assertIn("Original rows matched to cell site list: 1", log_text)
+            self.assertIn(
+                "Mapped-equivalent duplicate keys collapsed: 2", log_text
+            )
+            self.assertIn("Redundant cell site rows collapsed: 3", log_text)
+            self.assertIn(
+                "Unreferenced conflicting duplicate keys ignored: 1",
+                log_text,
+            )
             self.assertIn(
                 "Original source rows unmatched in cell site list: None",
                 log_text,

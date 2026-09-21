@@ -672,7 +672,9 @@ class KMLGenerator(QThread):
             # Get required columns
             coordinates = self.get_valid_coordinates_with_text(row)
             timestamp = self.get_timestamp_value(row)
-            azimuth = self.get_column_value(row, ['Azimuth', 'azimuth', 'bearing', 'direction'])
+            azimuth = self.get_numeric_column_value(
+                row, ['Azimuth', 'azimuth', 'bearing', 'direction']
+            )
             
             if coordinates is None:
                 invalid_coordinate_count += 1
@@ -685,7 +687,7 @@ class KMLGenerator(QThread):
             
             # Generate sector or circle based on azimuth availability
             try:
-                if not pd.isna(azimuth):
+                if azimuth is not None:
                     event_metadata = self.create_event_metadata(
                         idx, timestamp, EVENT_TYPES['tower_sector'], row
                     )
@@ -753,8 +755,13 @@ class KMLGenerator(QThread):
 
             coordinates = self.get_valid_coordinates_with_text(row)
             timestamp = self.get_timestamp_value(row)
-            azimuth = self.get_column_value(row, ['Azimuth', 'bearing', 'direction'])
-            distance = self.get_column_value(row, ['Distance', 'range', 'distance (m)', 'distance (meters)'])
+            azimuth = self.get_numeric_column_value(
+                row, ['Azimuth', 'bearing', 'direction']
+            )
+            distance = self.get_numeric_column_value(
+                row,
+                ['Distance', 'range', 'distance (m)', 'distance (meters)'],
+            )
             
             if coordinates is None:
                 invalid_coordinate_count += 1
@@ -766,8 +773,8 @@ class KMLGenerator(QThread):
                 timestamp = f"Entry {idx + 1}"
             
             # Determine visualization based on available data
-            has_azimuth = not pd.isna(azimuth)
-            has_distance = not pd.isna(distance)
+            has_azimuth = azimuth is not None
+            has_distance = distance is not None and distance >= 0
             
             try:
                 if has_azimuth and has_distance:
@@ -1055,6 +1062,17 @@ class KMLGenerator(QThread):
             if column is not None and not pd.isna(row[column]):
                 return row[column]
         return None
+
+    def get_numeric_column_value(self, row, possible_names):
+        """Return a finite numeric column value, including numeric text."""
+        value = self.get_column_value(row, possible_names)
+        try:
+            numeric_value = float(value)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(numeric_value):
+            return None
+        return int(numeric_value) if numeric_value.is_integer() else numeric_value
 
     def get_valid_coordinates(self, row):
         """Return validated decimal-degree coordinates or None."""
@@ -1830,7 +1848,9 @@ class KMLGenerator(QThread):
         for idx, (_, row) in enumerate(df.iterrows()):
             coordinates = self.get_valid_coordinates_with_text(row)
             timestamp = self.get_timestamp_value(row)
-            azimuth = self.get_column_value(row, ['Azimuth', 'azimuth', 'bearing', 'direction'])
+            azimuth = self.get_numeric_column_value(
+                row, ['Azimuth', 'azimuth', 'bearing', 'direction']
+            )
 
             if coordinates is None:
                 continue
@@ -1839,7 +1859,7 @@ class KMLGenerator(QThread):
                 timestamp = f"Entry {idx + 1}"
 
             try:
-                if not pd.isna(azimuth):
+                if azimuth is not None:
                     event_metadata = self.create_event_metadata(
                         idx, timestamp, EVENT_TYPES['tower_sector'], row
                     )
@@ -1870,8 +1890,13 @@ class KMLGenerator(QThread):
         for idx, (_, row) in enumerate(df.iterrows()):
             coordinates = self.get_valid_coordinates_with_text(row)
             timestamp = self.get_timestamp_value(row)
-            azimuth = self.get_column_value(row, ['Azimuth', 'bearing', 'direction'])
-            distance = self.get_column_value(row, ['Distance', 'range', 'distance (m)', 'distance (meters)'])
+            azimuth = self.get_numeric_column_value(
+                row, ['Azimuth', 'bearing', 'direction']
+            )
+            distance = self.get_numeric_column_value(
+                row,
+                ['Distance', 'range', 'distance (m)', 'distance (meters)'],
+            )
 
             if coordinates is None:
                 continue
@@ -1879,8 +1904,8 @@ class KMLGenerator(QThread):
             if pd.isna(timestamp):
                 timestamp = f"Entry {idx + 1}"
 
-            has_azimuth = not pd.isna(azimuth)
-            has_distance = not pd.isna(distance)
+            has_azimuth = azimuth is not None
+            has_distance = distance is not None and distance >= 0
 
             try:
                 if has_azimuth and has_distance:
@@ -2669,14 +2694,18 @@ class KMLGenerator(QThread):
     
     def convert_ta_distance_to_miles(self, distance, units):
         """Convert distance from tower distance to miles based on user-selected units"""
+        distance_float = float(distance)
+        if not math.isfinite(distance_float) or distance_float < 0:
+            raise ValueError("Distance must be a non-negative finite number")
+
         if units == "Meters":
-            return distance / 1609.34  # meters to miles
+            return distance_float / 1609.34  # meters to miles
         elif units == "Feet":
-            return distance / 5280  # feet to miles
+            return distance_float / 5280  # feet to miles
         elif units == "Miles":
-            return distance  # already in miles
+            return distance_float  # already in miles
         elif units == "Kilometers":
-            return distance / 1.60934  # kilometers to miles
+            return distance_float / 1.60934  # kilometers to miles
         else:
             # Default to meters if unknown unit
-            return distance / 1609.34
+            return distance_float / 1609.34

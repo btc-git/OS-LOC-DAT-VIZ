@@ -3,6 +3,7 @@ Open Source Location Data Visualizer - github.com/btc-git/OS-LOC-DAT-VIZ
 Licensed under the GNU General Public License v3.0 - see LICENSE file for details
 """
 
+import math
 import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -216,6 +217,7 @@ class ImportWizardDialog(QDialog):
     cell_site_loading_finished = pyqtSignal(bool)
     TIMESTAMP_EDGE_SCAN_LIMIT = 100
     CELL_SITE_ROW_AUDIT_LIMIT = 100
+    CELL_SITE_CONFLICT_DISPLAY_LIMIT = 10
 
     FIELD_ALIASES = {
         'Timestamp': ['timestamp', 'date time', 'datetime', 'start datetime', 'starttime',
@@ -241,6 +243,10 @@ class ImportWizardDialog(QDialog):
         'Azimuth': 'Azimuth',
         'Distance': 'Distance from tower',
         'Accuracy': 'Location accuracy',
+    }
+    TOWER_FIELD_LABELS = {
+        'Latitude': 'Cell tower/site latitude',
+        'Longitude': 'Cell tower/site longitude',
     }
     ORIGINAL_KEY_ALIASES = {
         'Site ID': [
@@ -272,22 +278,14 @@ class ImportWizardDialog(QDialog):
     CELL_SITE_FIELD_LABELS = {
         'Site ID': 'Site / Node ID',
         'Sector ID': 'Sector / Cell ID',
-        'Latitude': 'Site latitude',
-        'Longitude': 'Site longitude',
+        'Latitude': 'Cell tower/site latitude',
+        'Longitude': 'Cell tower/site longitude',
         'Azimuth': 'Sector azimuth',
     }
     CELL_SITE_POLICIES = [
         (
-            'Cell site list first; use original records when a value is missing',
-            'cell_site_first_fallback_original',
-        ),
-        (
-            'Cell site list only; leave unresolved values blank',
+            'Cell site list only; unmatched values remain blank',
             'cell_site_only',
-        ),
-        (
-            'Original records first; use cell site list when a value is missing',
-            'original_first_fallback_cell_site',
         ),
     ]
 
@@ -316,6 +314,7 @@ class ImportWizardDialog(QDialog):
         self.mapping_labels = {}
         self.original_key_mapping_combos = {}
         self.cell_site_mapping_combos = {}
+        self.cell_site_original_field_labels = {}
         self._cached_source_key = None
         self._cached_raw_dataframe = None
         self.cell_site_path = None
@@ -661,8 +660,11 @@ class ImportWizardDialog(QDialog):
         for row, field in enumerate(
             ('Latitude', 'Longitude', 'Azimuth'), 3
         ):
-            original_label = QLabel("Mapped above")
+            original_label = QLabel("Not used")
             original_label.setStyleSheet("color: #9a9a9a;")
+            original_label.setToolTip(
+                "This value comes from the separate cell site list."
+            )
             cell_site_combo = QComboBox()
             cell_site_combo.addItem("Not mapped", None)
             cell_site_combo.currentIndexChanged.connect(
@@ -672,25 +674,28 @@ class ImportWizardDialog(QDialog):
             cell_site_mapping_layout.addWidget(
                 QLabel(self.CELL_SITE_FIELD_LABELS[field]), row, 0
             )
+            self.cell_site_original_field_labels[field] = original_label
             cell_site_mapping_layout.addWidget(original_label, row, 1)
             cell_site_mapping_layout.addWidget(cell_site_combo, row, 2)
 
         cell_site_mapping_note = QLabel(
             "Match one site/node ID and one sector/cell ID from the original "
-            "records to the corresponding cell site list columns. Latitude and "
-            "longitude are required; azimuth is optional."
+            "records to the corresponding cell site list columns. Cell "
+            "tower/site latitude and longitude are required; sector azimuth "
+            "is optional."
         )
         cell_site_mapping_note.setWordWrap(True)
         cell_site_mapping_layout.addWidget(cell_site_mapping_note, 6, 0, 1, 3)
         cell_site_controls_layout.addWidget(cell_site_mapping_group)
 
         policy_layout = QHBoxLayout()
-        policy_layout.addWidget(QLabel("Value priority:"))
+        policy_layout.addWidget(QLabel("Tower field source:"))
         self.cell_site_policy_combo = QComboBox()
         for label, value in self.CELL_SITE_POLICIES:
             self.cell_site_policy_combo.addItem(label, value)
-        self.cell_site_policy_combo.currentIndexChanged.connect(
-            self.update_mapping_requirements
+        self.cell_site_policy_combo.setEnabled(False)
+        self.cell_site_policy_combo.setToolTip(
+            "Latitude, longitude, and azimuth are taken only from the cell site list."
         )
         policy_layout.addWidget(self.cell_site_policy_combo, 1)
         cell_site_controls_layout.addLayout(policy_layout)
@@ -741,6 +746,12 @@ class ImportWizardDialog(QDialog):
     @staticmethod
     def normalize_name(value):
         return re.sub(r'[^a-z0-9]+', ' ', str(value).lower()).strip()
+
+    def application_field_label(self, field, data_type=None):
+        data_type = data_type or self.record_type_combo.currentData()
+        if data_type in ('Tower/Sector', 'Distance from Tower'):
+            return self.TOWER_FIELD_LABELS.get(field, self.FIELD_LABELS[field])
+        return self.FIELD_LABELS[field]
 
     def populate_timezone_choices(self, combo, include_no_change=False):
         combo.clear()
@@ -1312,7 +1323,9 @@ class ImportWizardDialog(QDialog):
         for field, combo in self.mapping_combos.items():
             source_column = combo.currentData()
             if field in active_fields and source_column:
-                source_mappings[source_column] = self.FIELD_LABELS[field]
+                source_mappings[source_column] = self.application_field_label(
+                    field
+                )
 
         for column_index, source_column in enumerate(self.source_dataframe.columns):
             source_name = str(source_column)
@@ -1361,19 +1374,34 @@ class ImportWizardDialog(QDialog):
 
         for field in self.FIELD_ALIASES:
             visible = field in active_fields
+            self.mapping_labels[field].setText(
+                self.application_field_label(field, data_type)
+            )
             self.mapping_labels[field].setVisible(visible)
             self.mapping_combos[field].setVisible(visible)
+            supplied_by_cell_site = (
+                using_cell_site_list
+                and field in ('Latitude', 'Longitude', 'Azimuth')
+            )
+            self.mapping_labels[field].setEnabled(not supplied_by_cell_site)
+            self.mapping_combos[field].setEnabled(not supplied_by_cell_site)
+            self.mapping_combos[field].setToolTip(
+                "Not used while a separate cell site list is enabled."
+                if supplied_by_cell_site else ""
+            )
 
         if using_cell_site_list:
             note = (
-                "Tower coordinates and azimuth will be resolved using the cell "
-                "site list mapping below. Original Latitude, Longitude, and "
-                "Azimuth mappings are optional fallback sources."
+                "Cell tower/site latitude, cell tower/site longitude, and "
+                "sector azimuth come only from the cell site list below; the "
+                "disabled mappings above are not used."
             )
-        required_text = ', '.join(required) if required else 'no tower fields'
+        required_text = ', '.join([
+            *(self.application_field_label(field, data_type) for field in required),
+            timestamp_requirement,
+        ])
         self.mapping_note.setText(
-            f"Required in original records: {required_text}, plus "
-            f"{timestamp_requirement}. {note}"
+            f"Required in original records: {required_text}. {note}"
         )
         self.update_cell_site_controls()
         self.update_preview_headers()
@@ -1414,7 +1442,7 @@ class ImportWizardDialog(QDialog):
 
     def active_mapping_fields(self):
         """Return fields applicable to the selected record and timestamp layouts."""
-        fields = {'Latitude', 'Longitude'}
+        fields = set()
         if self.timestamp_layout_combo.currentData() == 'separate':
             fields.update({'Date', 'Time'})
         else:
@@ -1422,11 +1450,14 @@ class ImportWizardDialog(QDialog):
 
         data_type = self.record_type_combo.currentData()
         if data_type == 'Tower/Sector':
-            fields.add('Azimuth')
+            if not self.cell_site_list_enabled():
+                fields.update({'Latitude', 'Longitude', 'Azimuth'})
         elif data_type == 'Distance from Tower':
-            fields.update({'Azimuth', 'Distance'})
+            fields.add('Distance')
+            if not self.cell_site_list_enabled():
+                fields.update({'Latitude', 'Longitude', 'Azimuth'})
         else:
-            fields.add('Accuracy')
+            fields.update({'Latitude', 'Longitude', 'Accuracy'})
         return fields
 
     def update_timezone_controls(self):
@@ -1716,6 +1747,7 @@ class ImportWizardDialog(QDialog):
             original_key_mappings,
             cell_site_mappings,
             policy,
+            self.cell_site_header_row_spinbox.value(),
         )
         is_excel = Path(self.cell_site_path).suffix.lower() in ('.xls', '.xlsx')
         metadata = {
@@ -1781,6 +1813,31 @@ class ImportWizardDialog(QDialog):
             text = text.split('.', 1)[0]
         return text.casefold()
 
+    @staticmethod
+    def normalize_mapped_tower_value(value):
+        """Normalize mapped CSL values for duplicate comparison."""
+        if pd.isna(value):
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        try:
+            number = float(text)
+        except (TypeError, ValueError):
+            return ('text', text.casefold())
+        if not math.isfinite(number):
+            return ('text', text.casefold())
+        return ('number', number)
+
+    @staticmethod
+    def display_cell_site_value(value):
+        if pd.isna(value) or not str(value).strip():
+            return '<blank>'
+        text = str(value).strip()
+        if re.fullmatch(r'[+-]?\d+\.0+', text):
+            return text.split('.', 1)[0]
+        return text
+
     @classmethod
     def resolve_cell_site_fields(
         cls,
@@ -1790,6 +1847,7 @@ class ImportWizardDialog(QDialog):
         original_key_mappings,
         cell_site_mappings,
         policy,
+        cell_site_header_row=1,
     ):
         """Resolve tower coordinates and azimuth through a two-column CSL key."""
         supported_policies = {
@@ -1806,30 +1864,125 @@ class ImportWizardDialog(QDialog):
                 for field in ('Site ID', 'Sector ID')
             )
 
-        cell_site_rows = {}
-        duplicate_keys = set()
+        referenced_keys = set()
+        for _, source_row in source_dataframe.iterrows():
+            key = lookup_key(source_row, original_key_mappings)
+            if all(value is not None for value in key):
+                referenced_keys.add(key)
+
+        cell_site_groups = {}
         ignored_missing_key_rows = 0
-        for _, cell_site_row in cell_site_dataframe.iterrows():
+        for position, (_, cell_site_row) in enumerate(
+            cell_site_dataframe.iterrows()
+        ):
             key = lookup_key(cell_site_row, cell_site_mappings)
             if any(value is None for value in key):
                 ignored_missing_key_rows += 1
                 continue
-            if key in cell_site_rows:
-                duplicate_keys.add(key)
-                continue
-            cell_site_rows[key] = cell_site_row
+            cell_site_groups.setdefault(key, []).append(
+                (position, cell_site_row)
+            )
 
-        if duplicate_keys:
-            duplicate_count = len(duplicate_keys)
+        fields = ('Latitude', 'Longitude', 'Azimuth')
+        mapped_fields = tuple(
+            field for field in fields if cell_site_mappings.get(field)
+        )
+        cell_site_rows = {}
+        duplicate_keys_collapsed = 0
+        duplicate_rows_collapsed = 0
+        unreferenced_conflicting_keys_ignored = 0
+        conflicting_used_keys = []
+        for key, entries in cell_site_groups.items():
+            cell_site_rows[key] = entries[0][1]
+            if len(entries) == 1:
+                continue
+
+            signatures = {
+                tuple(
+                    cls.normalize_mapped_tower_value(
+                        row[cell_site_mappings[field]]
+                    )
+                    for field in mapped_fields
+                )
+                for _, row in entries
+            }
+            if len(signatures) == 1:
+                duplicate_keys_collapsed += 1
+                duplicate_rows_collapsed += len(entries) - 1
+                continue
+            if key not in referenced_keys:
+                unreferenced_conflicting_keys_ignored += 1
+                continue
+
+            differing_fields = []
+            for field in mapped_fields:
+                column = cell_site_mappings[field]
+                values = {
+                    cls.normalize_mapped_tower_value(row[column])
+                    for _, row in entries
+                }
+                if len(values) > 1:
+                    differing_fields.append(field)
+            conflicting_used_keys.append((key, entries, differing_fields))
+
+        if conflicting_used_keys:
+            conflict_count = len(conflicting_used_keys)
+            details = []
+            for _key, entries, differing_fields in conflicting_used_keys[
+                :cls.CELL_SITE_CONFLICT_DISPLAY_LIMIT
+            ]:
+                first_row = entries[0][1]
+                site_id = cls.display_cell_site_value(
+                    first_row[cell_site_mappings['Site ID']]
+                )
+                sector_id = cls.display_cell_site_value(
+                    first_row[cell_site_mappings['Sector ID']]
+                )
+                row_numbers = ', '.join(
+                    str(position + cell_site_header_row + 1)
+                    for position, _row in entries
+                )
+                field_details = []
+                for field in differing_fields:
+                    column = cell_site_mappings[field]
+                    display_values = []
+                    normalized_values = set()
+                    for _position, row in entries:
+                        normalized_value = cls.normalize_mapped_tower_value(
+                            row[column]
+                        )
+                        if normalized_value in normalized_values:
+                            continue
+                        normalized_values.add(normalized_value)
+                        display_values.append(
+                            cls.display_cell_site_value(row[column])
+                        )
+                    field_details.append(
+                        f"{cls.CELL_SITE_FIELD_LABELS[field]}: "
+                        + ' vs '.join(display_values)
+                    )
+                details.append(
+                    f"- Site / Node ID {site_id}; Sector / Cell ID "
+                    f"{sector_id}; cell site rows {row_numbers}; "
+                    + '; '.join(field_details)
+                )
+            omitted_count = (
+                conflict_count - cls.CELL_SITE_CONFLICT_DISPLAY_LIMIT
+            )
+            if omitted_count > 0:
+                details.append(f"- ...and {omitted_count} more conflicting keys")
             raise ValueError(
-                "The cell site list contains "
-                f"{duplicate_count} duplicate mapped site/sector "
-                f"{'key' if duplicate_count == 1 else 'keys'}. "
-                "Each mapped key must identify exactly one cell site row."
+                "The cell site list contains conflicting tower data for "
+                f"{conflict_count} mapped site/sector "
+                f"{'key' if conflict_count == 1 else 'keys'} used by the "
+                "original records:\n\n"
+                + '\n'.join(details)
+                + "\n\nCorrect or remove the conflicting cell site rows, then "
+                "import again. Identical mapped duplicates are accepted "
+                "automatically."
             )
 
         resolved = normalized.copy()
-        fields = ('Latitude', 'Longitude', 'Azimuth')
         for field in fields:
             if field not in resolved:
                 resolved[field] = pd.NA
@@ -1838,6 +1991,11 @@ class ImportWizardDialog(QDialog):
             'input_rows': len(source_dataframe),
             'cell_site_rows': len(cell_site_dataframe),
             'cell_site_rows_ignored_missing_key': ignored_missing_key_rows,
+            'duplicate_keys_collapsed': duplicate_keys_collapsed,
+            'duplicate_rows_collapsed': duplicate_rows_collapsed,
+            'unreferenced_conflicting_keys_ignored': (
+                unreferenced_conflicting_keys_ignored
+            ),
             'matched_rows': 0,
             'unmatched_rows': 0,
             'missing_key_rows': 0,
@@ -1918,8 +2076,19 @@ class ImportWizardDialog(QDialog):
             () if self.cell_site_list_enabled() else ('Latitude', 'Longitude')
         )
         required_fields = (*coordinate_fields, *timestamp_fields)
-        if any(not mappings.get(field) for field in required_fields):
-            QMessageBox.warning(self, "Incomplete Mapping", "Map the timestamp, latitude, and longitude fields before checking the filter.")
+        missing_fields = [
+            field for field in required_fields if not mappings.get(field)
+        ]
+        if missing_fields:
+            missing_labels = [
+                self.application_field_label(field) for field in missing_fields
+            ]
+            QMessageBox.warning(
+                self,
+                "Incomplete Mapping",
+                "Map the following fields before checking the filter:\n\n"
+                + ", ".join(missing_labels),
+            )
             return
 
         normalized = self.build_normalized_dataframe(mappings)

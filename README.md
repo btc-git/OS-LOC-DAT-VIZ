@@ -44,7 +44,7 @@ A standalone desktop application for **quick triage and initial visualization** 
 - Drag-and-drop CSV, XLS, and XLSX input
 - Built-in sample XLSX templates for proper formatting
 - Automatic column-mapping wizard for files that do not match a standard template
-- Optional separate cell site list joined by mapped site/node and sector/cell IDs
+- Optional separate cell site list joined by mapped site/node and sector/cell IDs as the authoritative tower-coordinate source
 - Optional inclusive date/time range filtering during import
 - Named timezone and fixed UTC-offset handling
 - Human-readable TXT generation log with hashes, settings, row outcomes, and warnings
@@ -70,7 +70,7 @@ Each generation writes a `.kml`, `.geojson`, and `.txt` file with the same base 
 
 For original carrier records that do not match a template, the import wizard opens automatically. It supports CSV, XLS, and XLSX files; worksheet and header-row selection; record-type selection; explicit column mapping; and optional inclusive date/time range filtering. Date selections include the complete start and end days by default; select **Use exact times** for narrower boundaries. **Check Matching Rows** reports both timestamp matches and rows with valid mapped coordinates before import. The filter uses the selected timezone interpretation, excludes timestamps that cannot be parsed or uniquely resolved, and records all filter counts and boundaries in the TXT generation log. Its live preview shows the first 25 source rows with each original column header and the application field currently mapped to it. Azimuth may be left unmapped when it is unavailable; the application will use a 360-degree visualization. Imported records are normalized in memory and the original file is not modified.
 
-Tower/Sector and Distance from Tower imports can optionally use a separate cell site list. Enable **Use a separate cell site list**, drop or browse to the CSL, select its worksheet and header row, then map a two-part lookup: the original record's site/node ID and sector/cell ID to the corresponding CSL columns. Map CSL latitude, longitude, and optionally azimuth. The value-priority selector supports CSL-first with original-record fallback, CSL-only, or original-record-first with CSL fallback. Duplicate CSL lookup keys are rejected as ambiguous. The TXT generation log records the CSL filename and hash, mappings, policy, match outcomes, and per-field source counts without recording lookup-key values.
+Tower/Sector and Distance from Tower imports can optionally use a separate cell site list. Enable **Use a separate cell site list**, drop or browse to the CSL, select its worksheet and header row, then map a two-part lookup: the original record's site/node ID and sector/cell ID to the corresponding CSL columns. Map CSL cell tower/site latitude, cell tower/site longitude, and optionally sector azimuth. While enabled, the corresponding original-record mappings are disabled and ignored; timestamp, lookup IDs, and Distance from tower still come from the original records. An unmatched lookup leaves the tower fields blank. Repeated lookup keys with equivalent mapped tower values are collapsed automatically. Conflicting duplicates stop the import only when the original records reference that key; the message identifies its site/node ID, sector/cell ID, CSL rows, and differing mapped fields. The TXT generation log records the CSL filename and hash, mappings, source policy, duplicate counts, and match outcomes without recording lookup-key values.
 
 ### Data Format Reference
 

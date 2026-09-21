@@ -877,6 +877,29 @@ class MainWindow(QMainWindow):
                     f"⚠️ Cell site lookup: {unmatched_rows} rows had no match; "
                     f"{missing_key_rows} rows lacked a complete lookup key"
                 )
+            duplicate_keys = cell_site_metadata.get(
+                'duplicate_keys_collapsed', 0
+            )
+            duplicate_rows = cell_site_metadata.get(
+                'duplicate_rows_collapsed', 0
+            )
+            if duplicate_keys:
+                self.add_status_message(
+                    f"⚠️ Cell site list: {duplicate_keys} repeated "
+                    f"site/sector {'key had' if duplicate_keys == 1 else 'keys had'} "
+                    "identical mapped tower values; "
+                    f"{duplicate_rows} redundant "
+                    f"{'row was' if duplicate_rows == 1 else 'rows were'} collapsed"
+                )
+            ignored_conflicts = cell_site_metadata.get(
+                'unreferenced_conflicting_keys_ignored', 0
+            )
+            if ignored_conflicts:
+                self.add_status_message(
+                    f"⚠️ Cell site list: {ignored_conflicts} conflicting duplicate "
+                    f"{'key was' if ignored_conflicts == 1 else 'keys were'} ignored "
+                    "because the imported records do not reference them"
+                )
         filter_metadata = dialog.selected_filter_metadata
         if filter_metadata.get('enabled'):
             self.add_status_message(
@@ -1582,7 +1605,7 @@ class MainWindow(QMainWindow):
                     f"Cell site list SHA-256: {cell_site_hash}",
                     f"Worksheet: {cell_site_metadata.get('worksheet') or 'Not applicable'}",
                     f"Header row: {cell_site_metadata.get('header_row')}",
-                    f"Value priority: {cell_site_metadata.get('policy_label') or cell_site_metadata.get('policy')}",
+                    f"Tower field source: {cell_site_metadata.get('policy_label') or cell_site_metadata.get('policy')}",
                     "Original-record lookup mapping:",
                 ])
                 for role, source_column in cell_site_metadata.get(
@@ -1598,6 +1621,9 @@ class MainWindow(QMainWindow):
                     f"Original rows evaluated: {cell_site_metadata.get('input_rows', 'Unknown')}",
                     f"Cell site list rows: {cell_site_metadata.get('cell_site_rows', 'Unknown')}",
                     f"Cell site list rows ignored - missing lookup key: {cell_site_metadata.get('cell_site_rows_ignored_missing_key', 'Unknown')}",
+                    f"Mapped-equivalent duplicate keys collapsed: {cell_site_metadata.get('duplicate_keys_collapsed', 0)}",
+                    f"Redundant cell site rows collapsed: {cell_site_metadata.get('duplicate_rows_collapsed', 0)}",
+                    f"Unreferenced conflicting duplicate keys ignored: {cell_site_metadata.get('unreferenced_conflicting_keys_ignored', 0)}",
                     f"Original rows matched to cell site list: {cell_site_metadata.get('matched_rows', 'Unknown')}",
                     f"Original rows unmatched in cell site list: {cell_site_metadata.get('unmatched_rows', 'Unknown')}",
                     f"Original source rows unmatched in cell site list: {self.format_audit_row_numbers(cell_site_metadata.get('unmatched_source_rows', []), cell_site_metadata.get('unmatched_rows', 0))}",

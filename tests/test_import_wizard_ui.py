@@ -178,6 +178,28 @@ class ImportWizardDialogUITests(unittest.TestCase):
         self.assertEqual("yyyy-MM-dd h:mm:ss AP", dialog.filter_start_edit.displayFormat())
         self.assertEqual("yyyy-MM-dd h:mm:ss AP", dialog.filter_end_edit.displayFormat())
 
+    def test_coordinate_labels_distinguish_tower_and_location_records(self):
+        dialog = ImportWizardDialog()
+
+        for data_type in ("Tower/Sector", "Distance from Tower"):
+            dialog.record_type_combo.setCurrentIndex(
+                dialog.record_type_combo.findData(data_type)
+            )
+            self.assertEqual(
+                "Cell tower/site latitude",
+                dialog.mapping_labels["Latitude"].text(),
+            )
+            self.assertEqual(
+                "Cell tower/site longitude",
+                dialog.mapping_labels["Longitude"].text(),
+            )
+
+        dialog.record_type_combo.setCurrentIndex(
+            dialog.record_type_combo.findData("Location Point")
+        )
+        self.assertEqual("Latitude", dialog.mapping_labels["Latitude"].text())
+        self.assertEqual("Longitude", dialog.mapping_labels["Longitude"].text())
+
     def test_excel_header_row_8_preview_uses_1_based_physical_rows(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "header_row_8.xlsx"
@@ -424,6 +446,9 @@ class ImportWizardDialogUITests(unittest.TestCase):
                 "Start_DateTime": "2024-01-15 14:00:00",
                 "Start_eNodeB": 1001,
                 "Start_Sector": 2,
+                "Latitude": 1.0,
+                "Longitude": 2.0,
+                "Azimuth": 3,
                 "Start_Timing_Advance_Miles": 0.31,
             }]).to_csv(records_path, index=False)
             pd.DataFrame([{
@@ -444,6 +469,20 @@ class ImportWizardDialogUITests(unittest.TestCase):
                 "Distance from Tower", dialog.record_type_combo.currentData()
             )
             dialog.use_cell_site_list_checkbox.setChecked(True)
+            self.assertEqual(
+                "cell_site_only", dialog.cell_site_policy_combo.currentData()
+            )
+            self.assertFalse(dialog.cell_site_policy_combo.isEnabled())
+            for field in ("Latitude", "Longitude", "Azimuth"):
+                self.assertFalse(dialog.mapping_combos[field].isEnabled())
+                self.assertEqual(
+                    "Not used",
+                    dialog.cell_site_original_field_labels[field].text(),
+                )
+            self.assertEqual(
+                {"Timestamp", "Distance"},
+                set(dialog.current_mappings()),
+            )
             dialog.load_cell_site_file(str(cell_sites_path), background=False)
 
             self.assertEqual(
@@ -463,20 +502,68 @@ class ImportWizardDialogUITests(unittest.TestCase):
                 dialog.cell_site_mapping_combos["Sector ID"].currentData(),
             )
 
+            dialog.filter_enabled_checkbox.setChecked(True)
+            with patch("import_wizard.QMessageBox.warning") as warning:
+                dialog.preview_filter_results()
+            warning.assert_not_called()
+
             dialog.accept_import()
 
             self.assertEqual(43.15, dialog.normalized_dataframe.loc[0, "Latitude"])
             self.assertEqual(-77.61, dialog.normalized_dataframe.loc[0, "Longitude"])
             self.assertEqual(135, dialog.normalized_dataframe.loc[0, "Azimuth"])
+            self.assertEqual(0.31, dialog.normalized_dataframe.loc[0, "Distance"])
             self.assertEqual(1, dialog.selected_cell_site_metadata["matched_rows"])
             self.assertEqual([], dialog.selected_cell_site_metadata["unmatched_source_rows"])
             self.assertEqual([], dialog.selected_cell_site_metadata["missing_key_source_rows"])
             self.assertEqual(
-                "cell_site_first_fallback_original",
+                "cell_site_only",
                 dialog.selected_cell_site_metadata["policy"],
             )
 
-    def test_duplicate_cell_site_keys_are_rejected_as_ambiguous(self):
+            dialog.mapping_combos["Timestamp"].setCurrentIndex(0)
+            with patch("import_wizard.QMessageBox.warning") as warning:
+                dialog.preview_filter_results()
+            warning.assert_called_once_with(
+                dialog,
+                "Incomplete Mapping",
+                "Map the following fields before checking the filter:\n\n"
+                "Timestamp (combined)",
+            )
+
+    def test_mapped_equivalent_cell_site_duplicates_are_collapsed(self):
+        records = pd.DataFrame([{"Node": 1001, "Sector": 1}])
+        normalized = pd.DataFrame(index=records.index)
+        cell_sites = pd.DataFrame([
+            {"Node": 1001, "Sector": 1, "Lat": 43.1, "Lon": -77.1, "Az": 120},
+            {"Node": "1001", "Sector": "1", "Lat": "43.10", "Lon": "-77.10", "Az": "120.0"},
+            {"Node": 2002, "Sector": 2, "Lat": 44.1, "Lon": -78.1, "Az": 20},
+            {"Node": 2002, "Sector": 2, "Lat": 45.1, "Lon": -79.1, "Az": 30},
+        ])
+
+        resolved, metadata = ImportWizardDialog.resolve_cell_site_fields(
+            normalized,
+            records,
+            cell_sites,
+            {"Site ID": "Node", "Sector ID": "Sector"},
+            {
+                "Site ID": "Node",
+                "Sector ID": "Sector",
+                "Latitude": "Lat",
+                "Longitude": "Lon",
+                "Azimuth": "Az",
+            },
+            "cell_site_only",
+        )
+
+        self.assertEqual(43.1, resolved.loc[0, "Latitude"])
+        self.assertEqual(-77.1, resolved.loc[0, "Longitude"])
+        self.assertEqual(120, resolved.loc[0, "Azimuth"])
+        self.assertEqual(1, metadata["duplicate_keys_collapsed"])
+        self.assertEqual(1, metadata["duplicate_rows_collapsed"])
+        self.assertEqual(1, metadata["unreferenced_conflicting_keys_ignored"])
+
+    def test_conflicting_used_cell_site_key_reports_key_rows_and_fields(self):
         records = pd.DataFrame([{"Node": 1001, "Sector": 1}])
         normalized = pd.DataFrame([{
             "Latitude": 40.1,
@@ -488,7 +575,7 @@ class ImportWizardDialogUITests(unittest.TestCase):
             {"Node": 1001, "Sector": 1, "Lat": 44.1, "Lon": -78.1},
         ])
 
-        with self.assertRaisesRegex(ValueError, "duplicate mapped site/sector key"):
+        with self.assertRaises(ValueError) as raised:
             ImportWizardDialog.resolve_cell_site_fields(
                 normalized,
                 records,
@@ -501,8 +588,17 @@ class ImportWizardDialogUITests(unittest.TestCase):
                     "Longitude": "Lon",
                     "Azimuth": None,
                 },
-                "cell_site_first_fallback_original",
+                "cell_site_only",
             )
+
+        message = str(raised.exception)
+        self.assertIn("conflicting tower data", message)
+        self.assertIn("Site / Node ID 1001", message)
+        self.assertIn("Sector / Cell ID 1", message)
+        self.assertIn("cell site rows 2, 3", message)
+        self.assertIn("Cell tower/site latitude: 43.1 vs 44.1", message)
+        self.assertIn("Cell tower/site longitude: -77.1 vs -78.1", message)
+        self.assertIn("Identical mapped duplicates are accepted automatically", message)
 
     def test_cell_site_excel_uses_its_own_sheet_and_header_row(self):
         with tempfile.TemporaryDirectory() as tmpdir:

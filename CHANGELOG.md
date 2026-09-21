@@ -5,7 +5,7 @@
 ## [Unreleased]
 
 ### Added
-- Optional separate cell site list import for Tower/Sector and Distance from Tower records, with mapped two-column lookup keys, configurable fallback priority, previews, match accounting, and TXT-log provenance
+- Optional separate cell site list import for Tower/Sector and Distance from Tower records, with mapped two-column lookup keys, authoritative tower fields, previews, match accounting, and TXT-log provenance
 - Paired GeoJSON output with the same event identity, temporal metadata, geometry, and display colors as KML
 - Stable `osloc_*` dataset, event, component, timezone, and epoch metadata for interoperable viewers
 - GeoLibre viewer plugin with event filtering, timeline playback, map labels, details, and focused navigation
@@ -20,6 +20,7 @@
 - Automated coverage for import-wizard behavior, temporal KML metadata, geometry preservation, and KML/GeoJSON parity
 
 ### Changed
+- Tower-based import labels now distinguish cell tower/site coordinates from Location Point coordinates; mapped-equivalent CSL duplicates are collapsed, while referenced conflicts report their keys, rows, and differing fields
 - KML now uses shared document styles, a flattened dataset folder, compact anchor metadata, and safe MultiGeometry consolidation to reduce import overhead
 - Source/evidence coordinates preserve supplied precision while derived geometry remains deterministically formatted
 - KML and GeoJSON event titles now use the same corrected local `MM/DD/YYYY, h:mm:ss AM/PM` format
