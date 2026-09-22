@@ -4,6 +4,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- TXT generation logs now record the source timestamp interpretation and selected output display timezone separately
+
 ## [1.3.0-beta.1] - 2026-09-21
 
 ### Added

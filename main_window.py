@@ -1926,6 +1926,25 @@ class MainWindow(QMainWindow):
                 digest.update(chunk)
         return digest.hexdigest()
 
+    @staticmethod
+    def format_audit_timezone(timezone_name, offset_minutes, no_change=False):
+        """Describe a source or display timezone selection for the audit log."""
+        if timezone_name:
+            label = next(
+                (
+                    choice_label
+                    for choice_label, choice_name in NAMED_TIMEZONE_CHOICES
+                    if choice_name == timezone_name
+                ),
+                timezone_name,
+            )
+            if label != timezone_name:
+                return f"{label} [{timezone_name}]"
+            return timezone_name
+        if no_change and offset_minutes is None:
+            return "No Change (source timezone preserved)"
+        return fixed_offset_label(int(offset_minutes or 0))
+
     def build_generation_log(self, output_file):
         """Create the human-readable audit log for the completed generation."""
         output_path = Path(output_file)
@@ -1938,14 +1957,20 @@ class MainWindow(QMainWindow):
         settings = self.current_generation_settings
         summary = self.kml_generator.audit_summary if self.kml_generator else {}
 
-        timezone_value = settings.get('source_timezone_name')
-        if timezone_value:
-            timezone_description = timezone_value
-        else:
-            offset_minutes = int(settings.get('source_utc_offset_minutes', 0))
-            sign = '+' if offset_minutes >= 0 else '-'
-            hours, minutes = divmod(abs(offset_minutes), 60)
-            timezone_description = f"Fixed UTC {sign}{hours:02d}:{minutes:02d}"
+        source_timezone_description = self.format_audit_timezone(
+            settings.get('source_timezone_name'),
+            settings.get('source_utc_offset_minutes', 0),
+        )
+        target_timezone_name = settings.get('target_timezone_name')
+        target_offset_minutes = settings.get('target_utc_offset_minutes')
+        display_timezone_description = self.format_audit_timezone(
+            target_timezone_name,
+            target_offset_minutes,
+            no_change=(
+                target_timezone_name is None
+                and target_offset_minutes is None
+            ),
+        )
 
         lines = [
             "Open Source Location Data Visualizer - Generation Log",
@@ -1964,7 +1989,8 @@ class MainWindow(QMainWindow):
             f"Record type: {self.current_generation_type}",
             "",
             "Timestamp interpretation",
-            f"Timezone: {timezone_description}",
+            f"Source timezone: {source_timezone_description}",
+            f"Display timezone: {display_timezone_description}",
             f"Slash/dash date order: {settings.get('source_date_order', 'MDY')}",
             f"Animation duration (minutes): {settings.get('duration_minutes', 30)}",
         ]

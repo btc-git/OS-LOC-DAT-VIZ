@@ -762,6 +762,41 @@ class GenerationActionTests(unittest.TestCase):
             self.assertEqual("log\n", selected_path.with_suffix(".txt").read_text(encoding="utf-8"))
             launch_mock.assert_called_once_with(selected_path)
 
+    def test_generation_log_records_source_and_display_timezones(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            source_path = root / "records.csv"
+            output_path = root / "result.kml"
+            source_path.write_text("records\n", encoding="utf-8")
+            output_path.write_text("<kml/>\n", encoding="utf-8")
+            output_path.with_suffix(".geojson").write_text(
+                '{"type":"FeatureCollection","features":[]}\n',
+                encoding="utf-8",
+            )
+
+            with patch.object(MainWindow, "show_disclaimer_dialog"):
+                window = MainWindow()
+            self.addCleanup(window.close)
+            window.current_generation_source_file = str(source_path)
+            window.current_generation_settings = {
+                "source_timezone_name": None,
+                "source_utc_offset_minutes": 0,
+                "target_timezone_name": "America/New_York",
+                "target_utc_offset_minutes": 0,
+                "source_date_order": "MDY",
+                "duration_minutes": 30,
+            }
+            window.current_generation_type = "Location Point"
+
+            log_text = window.build_generation_log(output_path)
+
+            self.assertIn("Source timezone: Fixed UTC+00:00", log_text)
+            self.assertIn(
+                "Display timezone: US Eastern (UTC-05:00 / UTC-04:00 DST) "
+                "[America/New_York]",
+                log_text,
+            )
+
     def test_generation_log_records_cell_site_list_provenance(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
