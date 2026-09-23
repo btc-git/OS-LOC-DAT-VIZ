@@ -12,7 +12,7 @@ from unittest.mock import Mock, patch
 
 import pandas as pd
 from openpyxl import Workbook
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import QDateTime, QTimer
 from PyQt6.QtTest import QSignalSpy
 from PyQt6.QtWidgets import QApplication
 
@@ -178,6 +178,66 @@ class ImportWizardDialogUITests(unittest.TestCase):
         self.assertEqual("yyyy-MM-dd h:mm:ss AP", dialog.filter_start_edit.displayFormat())
         self.assertEqual("yyyy-MM-dd h:mm:ss AP", dialog.filter_end_edit.displayFormat())
 
+    def test_filter_uses_display_timezone_or_source_when_unchanged(self):
+        dialog = ImportWizardDialog()
+        dialog.filter_enabled_checkbox.setChecked(True)
+        dialog.date_order_combo.setCurrentIndex(
+            dialog.date_order_combo.findData('YMD')
+        )
+        selected_day = QDateTime.fromString(
+            '2024-01-15 12:00:00', 'yyyy-MM-dd HH:mm:ss'
+        )
+        records = pd.DataFrame([
+            {
+                'Timestamp': '2024-01-15T02:00:00Z',
+                'Latitude': 43.15,
+                'Longitude': -77.61,
+            },
+            {
+                'Timestamp': '2024-01-16T02:00:00Z',
+                'Latitude': 43.16,
+                'Longitude': -77.62,
+            },
+        ])
+
+        eastern_index = next(
+            index
+            for index in range(dialog.target_timezone_combo.count())
+            if (
+                dialog.target_timezone_combo.itemData(index) or {}
+            ).get('timezone_name') == 'America/New_York'
+        )
+        dialog.target_timezone_combo.setCurrentIndex(eastern_index)
+        dialog.filter_start_edit.setDateTime(selected_day)
+        dialog.filter_end_edit.setDateTime(selected_day)
+
+        display_filtered, display_metadata = dialog.apply_datetime_filter(
+            records
+        )
+
+        self.assertEqual([1], display_filtered.index.tolist())
+        self.assertEqual('display', display_metadata['filter_timezone_basis'])
+        self.assertEqual('2024-01-15T05:00:00Z', display_metadata['start_utc'])
+        self.assertEqual('2024-01-16T04:59:59Z', display_metadata['end_utc'])
+        self.assertIn(
+            'selected display timezone', dialog.filter_timezone_note.text()
+        )
+
+        dialog.target_timezone_combo.setCurrentIndex(0)
+        dialog.filter_start_edit.setDateTime(selected_day)
+        dialog.filter_end_edit.setDateTime(selected_day)
+
+        source_filtered, source_metadata = dialog.apply_datetime_filter(records)
+
+        self.assertEqual([0], source_filtered.index.tolist())
+        self.assertEqual('source', source_metadata['filter_timezone_basis'])
+        self.assertEqual('2024-01-15T00:00:00Z', source_metadata['start_utc'])
+        self.assertEqual('2024-01-15T23:59:59Z', source_metadata['end_utc'])
+        self.assertIn(
+            'source timezone because display is No Change',
+            dialog.filter_timezone_note.text(),
+        )
+
     def test_coordinate_labels_distinguish_tower_and_location_records(self):
         dialog = ImportWizardDialog()
 
@@ -262,6 +322,28 @@ class ImportWizardDialogUITests(unittest.TestCase):
             self.assertEqual(
                 "2024-01-17 16:30:00",
                 dialog.filter_end_edit.dateTime().toString("yyyy-MM-dd HH:mm:ss"),
+            )
+
+            eastern_index = next(
+                index
+                for index in range(dialog.target_timezone_combo.count())
+                if (
+                    dialog.target_timezone_combo.itemData(index) or {}
+                ).get('timezone_name') == 'America/New_York'
+            )
+            dialog.target_timezone_combo.setCurrentIndex(eastern_index)
+
+            self.assertEqual(
+                "2024-01-15 09:00:00",
+                dialog.filter_start_edit.dateTime().toString(
+                    "yyyy-MM-dd HH:mm:ss"
+                ),
+            )
+            self.assertEqual(
+                "2024-01-17 11:30:00",
+                dialog.filter_end_edit.dateTime().toString(
+                    "yyyy-MM-dd HH:mm:ss"
+                ),
             )
 
     def test_timestamp_defaults_do_not_parse_every_source_row(self):

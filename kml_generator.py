@@ -1633,12 +1633,11 @@ class KMLGenerator(QThread):
             timestamp_float = float(timestamp_str)
             # Excel serial dates are stored as days since 1900-01-01
             # Check if it's a reasonable Excel serial (between 1 and ~50000, which covers years 1900-2037)
-            if 1 < timestamp_float < 50000:
-                excel_epoch = datetime(1900, 1, 1)
-                # Excel has a leap year bug - day 60 doesn't exist (Feb 29, 1900)
+            if 1 <= timestamp_float <= 50000:
+                excel_epoch = datetime(1899, 12, 30)
                 days_offset = int(timestamp_float)
-                if days_offset > 59:  # After the non-existent Feb 29, 1900
-                    days_offset -= 1
+                if days_offset < 60:
+                    days_offset += 1
                 fractional_day = timestamp_float - int(timestamp_float)
                 dt = excel_epoch + timedelta(days=days_offset, seconds=fractional_day * 86400)
                 display_label = dt.strftime('%Y-%m-%d %H:%M:%S')

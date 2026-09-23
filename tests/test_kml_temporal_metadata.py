@@ -153,6 +153,25 @@ class KMLTemporalMetadataTests(unittest.TestCase):
         self.assertIn('43.162849', kml_content)
         self.assertIn('"FeatureCollection"', geojson_content)
 
+    def test_excel_serial_dates_match_excel_1900_calendar(self):
+        generator = KMLGenerator('', 'Tower/Sector', generator_settings())
+
+        expected_timestamps = {
+            1: '1900-01-01T00:00:00Z',
+            59: '1900-02-28T00:00:00Z',
+            60: '1900-02-28T00:00:00Z',
+            61: '1900-03-01T00:00:00Z',
+            45292: '2024-01-01T00:00:00Z',
+            45696.5: '2025-02-08T12:00:00Z',
+            50000: '2036-11-21T00:00:00Z',
+        }
+        for serial_value, expected_timestamp in expected_timestamps.items():
+            with self.subTest(serial_value=serial_value):
+                self.assertEqual(
+                    expected_timestamp,
+                    generator.parse_timestamp_to_kml(serial_value)[0],
+                )
+
     def test_ambiguous_numeric_dash_dates_use_selected_order(self):
         mdy_generator = KMLGenerator('', 'Tower/Sector', generator_settings())
         dmy_settings = generator_settings()

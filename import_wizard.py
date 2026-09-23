@@ -482,7 +482,10 @@ class ImportWizardDialog(QDialog):
         self.filter_exact_times_checkbox = QCheckBox("Use exact times")
         self.filter_exact_times_checkbox.toggled.connect(self.update_filter_controls)
         filter_layout.addWidget(self.filter_exact_times_checkbox, 0, 4)
-        filter_layout.addWidget(QLabel("From:"), 1, 0)
+        self.filter_timezone_note = QLabel()
+        self.filter_timezone_note.setWordWrap(True)
+        filter_layout.addWidget(self.filter_timezone_note, 1, 0, 1, 5)
+        filter_layout.addWidget(QLabel("From:"), 2, 0)
         self.filter_start_edit = QDateTimeEdit()
         self.filter_start_edit.setCalendarPopup(True)
         self.filter_start_edit.setDisplayFormat("MM/dd/yyyy")
@@ -490,26 +493,26 @@ class ImportWizardDialog(QDialog):
             QDateTime.currentDateTime().addDays(-1).toLocalTime()
         )
         self.filter_start_edit.setTime(QTime(0, 0, 0))
-        filter_layout.addWidget(self.filter_start_edit, 1, 1)
-        filter_layout.addWidget(QLabel("Through:"), 1, 2)
+        filter_layout.addWidget(self.filter_start_edit, 2, 1)
+        filter_layout.addWidget(QLabel("Through:"), 2, 2)
         self.filter_end_edit = QDateTimeEdit()
         self.filter_end_edit.setCalendarPopup(True)
         self.filter_end_edit.setDisplayFormat("MM/dd/yyyy")
         self.filter_end_edit.setDateTime(QDateTime.currentDateTime())
         self.filter_end_edit.setTime(QTime(23, 59, 59))
-        filter_layout.addWidget(self.filter_end_edit, 1, 3)
+        filter_layout.addWidget(self.filter_end_edit, 2, 3)
         self.filter_preview_button = QPushButton("Check Matching Rows")
         self.filter_preview_button.clicked.connect(self.preview_filter_results)
-        filter_layout.addWidget(self.filter_preview_button, 1, 4)
+        filter_layout.addWidget(self.filter_preview_button, 2, 4)
         filter_note = QLabel(
             "When readable timestamps are mapped, this range is filled from the first and last readable records. "
-            "By default, the full start and end days are included. Exact times use the timestamp interpretation selected above."
+            "By default, the full start and end days are included."
         )
         filter_note.setWordWrap(True)
-        filter_layout.addWidget(filter_note, 2, 0, 1, 4)
+        filter_layout.addWidget(filter_note, 3, 0, 1, 4)
         self.filter_result_label = QLabel("Enable the filter to check how many rows will be retained.")
         self.filter_result_label.setWordWrap(True)
-        filter_layout.addWidget(self.filter_result_label, 3, 0, 1, 5)
+        filter_layout.addWidget(self.filter_result_label, 4, 0, 1, 5)
         content_layout.addWidget(filter_group)
         for combo in self.mapping_combos.values():
             combo.currentIndexChanged.connect(self.invalidate_filter_preview)
@@ -795,6 +798,29 @@ class ImportWizardDialog(QDialog):
         if timezone_name is not None:
             return timezone_name, 0
         return None, int(offset_minutes if offset_minutes is not None else 0)
+
+    def effective_filter_timezone_selection(self):
+        """Return the timezone used to interpret filter boundary controls."""
+        target_timezone_name, target_offset_minutes = self.timezone_selection(
+            self.target_timezone_combo
+        )
+        if target_timezone_name is not None or target_offset_minutes is not None:
+            return (
+                target_timezone_name,
+                target_offset_minutes,
+                self.target_timezone_combo.currentText(),
+                'display',
+            )
+
+        source_timezone_name, source_offset_minutes = self.timezone_selection(
+            self.source_timezone_combo
+        )
+        return (
+            source_timezone_name,
+            source_offset_minutes,
+            self.source_timezone_combo.currentText(),
+            'source',
+        )
 
     def browse_file(self):
         file_path, _ = QFileDialog.getOpenFileName(
@@ -1462,8 +1488,20 @@ class ImportWizardDialog(QDialog):
         return fields
 
     def update_timezone_controls(self):
-        # Both source and target timezone selectors are always available.
-        return
+        if not hasattr(self, 'filter_timezone_note'):
+            return
+        _, _, timezone_label, timezone_basis = (
+            self.effective_filter_timezone_selection()
+        )
+        if timezone_basis == 'display':
+            basis_text = "the selected display timezone"
+        else:
+            basis_text = "the source timezone because display is No Change"
+        self.filter_timezone_note.setText(
+            f"Filter dates and times use {timezone_label} ({basis_text}). "
+            "Records are converted to UTC for comparison."
+        )
+        self.populate_filter_range_from_source()
 
     def update_filter_controls(self):
         enabled = self.filter_enabled_checkbox.isChecked()
@@ -1629,12 +1667,17 @@ class ImportWizardDialog(QDialog):
         if not parsed_timestamps:
             return
 
-        if source_timezone_name:
-            source_timezone = ZoneInfo(source_timezone_name)
+        filter_timezone_name, filter_offset_minutes, _, _ = (
+            self.effective_filter_timezone_selection()
+        )
+        if filter_timezone_name:
+            filter_timezone = ZoneInfo(filter_timezone_name)
         else:
-            source_timezone = timezone(timedelta(minutes=source_offset_minutes))
-        start_datetime = min(parsed_timestamps).astimezone(source_timezone)
-        end_datetime = max(parsed_timestamps).astimezone(source_timezone)
+            filter_timezone = timezone(
+                timedelta(minutes=filter_offset_minutes)
+            )
+        start_datetime = min(parsed_timestamps).astimezone(filter_timezone)
+        end_datetime = max(parsed_timestamps).astimezone(filter_timezone)
         start_qdatetime = QDateTime.fromString(
             start_datetime.strftime('%Y-%m-%d %H:%M:%S'),
             'yyyy-MM-dd HH:mm:ss',
@@ -2162,17 +2205,35 @@ class ImportWizardDialog(QDialog):
         if not self.filter_enabled_checkbox.isChecked():
             return normalized, {'enabled': False}
 
-        settings = {
+        source_settings = {
             'source_utc_offset_minutes': self.timezone_selection(self.source_timezone_combo)[1],
             'source_timezone_name': self.timezone_selection(self.source_timezone_combo)[0],
             'source_date_order': self.date_order_combo.currentData(),
         }
-        parser = KMLGenerator(self.source_path, self.record_type_combo.currentData(), settings)
-        start_source, end_source = self.current_filter_boundaries()
+        record_parser = KMLGenerator(
+            self.source_path, self.record_type_combo.currentData(),
+            source_settings
+        )
+        (
+            filter_timezone_name,
+            filter_offset_minutes,
+            filter_timezone_label,
+            filter_timezone_basis,
+        ) = self.effective_filter_timezone_selection()
+        boundary_parser = KMLGenerator(
+            self.source_path,
+            self.record_type_combo.currentData(),
+            {
+                'source_utc_offset_minutes': filter_offset_minutes,
+                'source_timezone_name': filter_timezone_name,
+                'source_date_order': self.date_order_combo.currentData(),
+            },
+        )
+        start_local, end_local = self.current_filter_boundaries()
 
         try:
-            start_kml, _ = parser.parse_timestamp_to_kml(start_source)
-            end_kml, _ = parser.parse_timestamp_to_kml(end_source)
+            start_kml, _ = boundary_parser.parse_timestamp_to_kml(start_local)
+            end_kml, _ = boundary_parser.parse_timestamp_to_kml(end_local)
         except TimestampResolutionError as error:
             raise ValueError(f"The selected filter boundary is not a unique local time: {error}") from error
 
@@ -2185,8 +2246,8 @@ class ImportWizardDialog(QDialog):
         unparseable_count = 0
         for row_index, row in normalized.iterrows():
             try:
-                timestamp = parser.get_timestamp_value(row)
-                record_kml, _ = parser.parse_timestamp_to_kml(timestamp)
+                timestamp = record_parser.get_timestamp_value(row)
+                record_kml, _ = record_parser.parse_timestamp_to_kml(timestamp)
             except TimestampResolutionError:
                 record_kml = None
             if not record_kml:
@@ -2196,14 +2257,16 @@ class ImportWizardDialog(QDialog):
 
         filtered = normalized.loc[retained_indexes].copy()
         valid_coordinate_rows = sum(
-            parser.get_valid_coordinates(row) is not None
+            record_parser.get_valid_coordinates(row) is not None
             for _, row in filtered.iterrows()
         )
         metadata = {
             'enabled': True,
             'exact_times': self.filter_exact_times_checkbox.isChecked(),
-            'start_source': start_source,
-            'end_source': end_source,
+            'filter_timezone_label': filter_timezone_label,
+            'filter_timezone_basis': filter_timezone_basis,
+            'start_local': start_local,
+            'end_local': end_local,
             'start_utc': start_kml,
             'end_utc': end_kml,
             'input_rows': len(normalized),

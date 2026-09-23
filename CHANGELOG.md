@@ -6,6 +6,8 @@
 
 ### Fixed
 - TXT generation logs now record the source timestamp interpretation and selected output display timezone separately
+- Numeric Excel serial timestamps now use Excel's 1900 date system without a one-day shift
+- Import date/time filters now use the selected display timezone, or the source timezone when display is set to No Change
 
 ## [1.3.0-beta.1] - 2026-09-21
 

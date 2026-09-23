@@ -2057,11 +2057,17 @@ class MainWindow(QMainWindow):
                     ])
             filter_metadata = self.current_import_metadata.get('date_time_filter', {})
             if filter_metadata.get('enabled'):
+                filter_timezone_basis = (
+                    "selected display timezone"
+                    if filter_metadata.get('filter_timezone_basis') == 'display'
+                    else "source timezone; display set to No Change"
+                )
                 lines.extend([
                     "",
                     "Import date/time filter",
                     f"Boundary mode: {'Exact date/time' if filter_metadata.get('exact_times') else 'Whole days'}",
-                    f"Source range (inclusive): {filter_metadata.get('start_source')} through {filter_metadata.get('end_source')}",
+                    f"Filter timezone: {filter_metadata.get('filter_timezone_label')} ({filter_timezone_basis})",
+                    f"Local range (inclusive): {filter_metadata.get('start_local', filter_metadata.get('start_source'))} through {filter_metadata.get('end_local', filter_metadata.get('end_source'))}",
                     f"UTC range (inclusive): {filter_metadata.get('start_utc')} through {filter_metadata.get('end_utc')}",
                     f"Rows before filter: {filter_metadata.get('input_rows')}",
                     f"Rows retained: {filter_metadata.get('retained_rows')}",

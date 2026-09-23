@@ -787,6 +787,28 @@ class GenerationActionTests(unittest.TestCase):
                 "duration_minutes": 30,
             }
             window.current_generation_type = "Location Point"
+            window.current_import_metadata = {
+                "worksheet": None,
+                "header_row": 1,
+                "mappings": {"Timestamp": "Timestamp"},
+                "cell_site_list": {"enabled": False},
+                "date_time_filter": {
+                    "enabled": True,
+                    "exact_times": False,
+                    "filter_timezone_label": "US Eastern (UTC-05:00 / UTC-04:00 DST)",
+                    "filter_timezone_basis": "display",
+                    "start_local": "2024-01-15 00:00:00",
+                    "end_local": "2024-01-15 23:59:59",
+                    "start_utc": "2024-01-15T05:00:00Z",
+                    "end_utc": "2024-01-16T04:59:59Z",
+                    "input_rows": 2,
+                    "retained_rows": 1,
+                    "excluded_rows": 1,
+                    "unparseable_rows": 0,
+                    "valid_coordinate_rows": 1,
+                    "invalid_coordinate_rows": 0,
+                },
+            }
 
             log_text = window.build_generation_log(output_path)
 
@@ -794,6 +816,21 @@ class GenerationActionTests(unittest.TestCase):
             self.assertIn(
                 "Display timezone: US Eastern (UTC-05:00 / UTC-04:00 DST) "
                 "[America/New_York]",
+                log_text,
+            )
+            self.assertIn(
+                "Filter timezone: US Eastern (UTC-05:00 / UTC-04:00 DST) "
+                "(selected display timezone)",
+                log_text,
+            )
+            self.assertIn(
+                "Local range (inclusive): 2024-01-15 00:00:00 through "
+                "2024-01-15 23:59:59",
+                log_text,
+            )
+            self.assertIn(
+                "UTC range (inclusive): 2024-01-15T05:00:00Z through "
+                "2024-01-16T04:59:59Z",
                 log_text,
             )
 
