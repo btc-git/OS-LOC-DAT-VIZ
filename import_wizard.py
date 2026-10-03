@@ -225,11 +225,20 @@ class ImportWizardDialog(QDialog):
         'Date': ['date', 'conn date', 'connection date', 'start date'],
         'Time': ['time', 'conn time', 'conn time utc', 'connection time',
                  'connection time utc', 'start time'],
-        'Latitude': ['latitude', 'lat', 'tower latitude', 'tower lat', 'cell latitude', 'cell lat'],
-        'Longitude': ['longitude', 'lon', 'long', 'tower longitude', 'tower lon', 'cell longitude', 'cell lon'],
+        'Latitude': [
+            'latitude', 'lat', 'site latitude', 'site lat',
+            'cell site latitude', 'cell site lat', 'tower latitude',
+            'tower lat', 'cell latitude', 'cell lat',
+        ],
+        'Longitude': [
+            'longitude', 'lon', 'long', 'site longitude', 'site lon',
+            'site long', 'cell site longitude', 'cell site lon',
+            'tower longitude', 'tower lon', 'cell longitude', 'cell lon',
+        ],
         'Azimuth': ['azimuth', 'bearing', 'direction'],
         'Distance': [
             'distance', 'range', 'distance m', 'distance meters',
+            'distance from cell site', 'distance from site', 'distance from tower',
             'start timing advance miles',
         ],
         'Accuracy': ['gps accuracy', 'accuracy', 'gps_accuracy'],
@@ -241,12 +250,12 @@ class ImportWizardDialog(QDialog):
         'Latitude': 'Latitude',
         'Longitude': 'Longitude',
         'Azimuth': 'Azimuth',
-        'Distance': 'Distance from tower',
+        'Distance': 'Distance from cell site',
         'Accuracy': 'Location accuracy',
     }
     TOWER_FIELD_LABELS = {
-        'Latitude': 'Cell tower/site latitude',
-        'Longitude': 'Cell tower/site longitude',
+        'Latitude': 'Cell site latitude',
+        'Longitude': 'Cell site longitude',
     }
     ORIGINAL_KEY_ALIASES = {
         'Site ID': [
@@ -267,19 +276,21 @@ class ImportWizardDialog(QDialog):
         'Sector ID': ['cell id', 'sector id', 'sector', 'cell'],
         'Latitude': [
             'site lat', 'site latitude', 'latitude', 'lat', 'tower latitude',
-            'tower lat', 'cell latitude', 'cell lat',
+            'tower lat', 'cell site latitude', 'cell site lat',
+            'cell latitude', 'cell lat',
         ],
         'Longitude': [
             'site long', 'site longitude', 'longitude', 'lon', 'long',
-            'tower longitude', 'tower lon', 'cell longitude', 'cell lon',
+            'tower longitude', 'tower lon', 'site lon', 'cell site longitude',
+            'cell site lon', 'cell longitude', 'cell lon',
         ],
         'Azimuth': ['azimuth', 'bearing', 'direction'],
     }
     CELL_SITE_FIELD_LABELS = {
         'Site ID': 'Site / Node ID',
         'Sector ID': 'Sector / Cell ID',
-        'Latitude': 'Cell tower/site latitude',
-        'Longitude': 'Cell tower/site longitude',
+        'Latitude': 'Cell site latitude',
+        'Longitude': 'Cell site longitude',
         'Azimuth': 'Sector azimuth',
     }
     CELL_SITE_POLICIES = [
@@ -390,8 +401,8 @@ class ImportWizardDialog(QDialog):
         options_layout.addWidget(QLabel("Record type:"), 1, 0)
         self.record_type_combo = QComboBox()
         self.record_type_combo.addItem("Location Point", "Location Point")
-        self.record_type_combo.addItem("Tower/Sector", "Tower/Sector")
-        self.record_type_combo.addItem("Distance from Tower", "Distance from Tower")
+        self.record_type_combo.addItem("Cell Site/Sector", "Tower/Sector")
+        self.record_type_combo.addItem("Distance from Cell Site", "Distance from Tower")
         self.record_type_combo.currentIndexChanged.connect(self.update_mapping_requirements)
         options_layout.addWidget(self.record_type_combo, 1, 1, 1, 2)
         options_layout.addWidget(QLabel("Timestamp layout:"), 2, 0)
@@ -579,7 +590,7 @@ class ImportWizardDialog(QDialog):
         self.cell_site_group = QGroupBox("Separate Cell Site List (Optional)")
         cell_site_layout = QVBoxLayout(self.cell_site_group)
         self.use_cell_site_list_checkbox = QCheckBox(
-            "Use a separate cell site list for tower coordinates and azimuth"
+            "Use a separate cell site list for cell site coordinates and azimuth"
         )
         self.use_cell_site_list_checkbox.toggled.connect(
             self.on_cell_site_enabled_changed
@@ -685,7 +696,7 @@ class ImportWizardDialog(QDialog):
         cell_site_mapping_note = QLabel(
             "Match one site/node ID and one sector/cell ID from the original "
             "records to the corresponding cell site list columns. Cell "
-            "tower/site latitude and longitude are required; sector azimuth "
+            "cell site latitude and longitude are required; sector azimuth "
             "is optional."
         )
         cell_site_mapping_note.setWordWrap(True)
@@ -693,7 +704,7 @@ class ImportWizardDialog(QDialog):
         cell_site_controls_layout.addWidget(cell_site_mapping_group)
 
         policy_layout = QHBoxLayout()
-        policy_layout.addWidget(QLabel("Tower field source:"))
+        policy_layout.addWidget(QLabel("Cell site field source:"))
         self.cell_site_policy_combo = QComboBox()
         for label, value in self.CELL_SITE_POLICIES:
             self.cell_site_policy_combo.addItem(label, value)
@@ -1247,7 +1258,7 @@ class ImportWizardDialog(QDialog):
         )
 
     def populate_cell_site_mapping_options(self):
-        """Populate and suggest CSL-side join and tower field mappings."""
+        """Populate and suggest CSL-side join and site field mappings."""
         if self.cell_site_dataframe is None:
             return
         columns = [str(column) for column in self.cell_site_dataframe.columns]
@@ -1419,7 +1430,7 @@ class ImportWizardDialog(QDialog):
 
         if using_cell_site_list:
             note = (
-                "Cell tower/site latitude, cell tower/site longitude, and "
+                "Cell site latitude, cell site longitude, and "
                 "sector azimuth come only from the cell site list below; the "
                 "disabled mappings above are not used."
             )
@@ -1451,7 +1462,7 @@ class ImportWizardDialog(QDialog):
         self.use_cell_site_list_checkbox.setEnabled(supported)
         self.use_cell_site_list_checkbox.setToolTip(
             "" if supported else
-            "Separate cell site lists apply only to tower-based records."
+            "Separate cell site lists apply only to cell-site-based records."
         )
         controls_enabled = (
             supported
@@ -1941,7 +1952,7 @@ class ImportWizardDialog(QDialog):
         policy,
         cell_site_header_row=1,
     ):
-        """Resolve tower coordinates and azimuth through a two-column CSL key."""
+        """Resolve site coordinates and azimuth through a two-column CSL key."""
         supported_policies = {
             'cell_site_first_fallback_original',
             'cell_site_only',
@@ -2064,8 +2075,8 @@ class ImportWizardDialog(QDialog):
             if omitted_count > 0:
                 details.append(f"- ...and {omitted_count} more conflicting keys")
             raise ValueError(
-                "The cell site list contains conflicting tower data for "
-                f"{conflict_count} mapped site/sector "
+                "The cell site list contains conflicting cell site data for "
+                f"{conflict_count} mapped cell site/sector "
                 f"{'key' if conflict_count == 1 else 'keys'} used by the "
                 "original records:\n\n"
                 + '\n'.join(details)

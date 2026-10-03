@@ -5,7 +5,7 @@ This application was developed with AI assistance and has undergone human review
 
 ---
 
-A standalone desktop application for **quick triage and initial visualization** of location data. This tool converts data containing tower/sector, distance from tower, and location point information into paired KML and GeoJSON files for preliminary analysis.
+A standalone desktop application for **quick triage and initial visualization** of location data. This tool converts data containing cell site/sector, distance from cell site, and location point information into paired KML and GeoJSON files for preliminary analysis.
 
 ⚠️ **IMPORTANT: This is for initial review only. All findings must be analyzed and verified.**
 
@@ -22,14 +22,14 @@ They do not replace the stable download above.
 
 ### 🎯 **Data Type Support**
 
-- **Tower/Sector Data**: Creates directional wedges with azimuth (does not depict coverage)
-- **Distance from Tower Data**: Generates distance-based band visualization with configurable inner/outer band thickness
+- **Cell Site/Sector Data**: Creates directional wedges with azimuth (does not depict coverage)
+- **Distance from Cell Site Data**: Generates distance-based band visualization with configurable inner/outer band thickness
 - **Location Point Data**: Displays points with accuracy radius circles
 
 ### 🎨 **Customizable Visualization**
 
 - Adjustable sector width, leg length, and shaded area length
-- Configurable distance band (inner/outer) for Distance from Tower data
+- Configurable distance band (inner/outer) for Distance from Cell Site data
 - Color-coded data types with customizable colors
 - Static reference-site dots with a selectable color and a configurable nearby-CSL radius
 - Unlimited static markers with individual colors, map labels, and details
@@ -39,7 +39,7 @@ They do not replace the stable download above.
 ### **Output & Interoperability**
 
 - Paired KML and GeoJSON exports with matching event and dataset metadata
-- Independently toggleable, untimed reference-site record set for tower-based outputs
+- Independently toggleable, untimed reference-cell-site record set for cell-site-based outputs
 - Separate static Markers record set with whole-set and individual marker controls
 - KML output for Google Earth Pro and compatible GIS software
 - GeoJSON output optimized for GeoLibre/MapLibre workflows
@@ -53,7 +53,7 @@ They do not replace the stable download above.
 - Built-in sample XLSX templates for proper formatting
 - Manual marker entry plus CSV/XLS/XLSX marker-list drag and drop
 - Automatic column-mapping wizard for files that do not match a standard template
-- Optional separate cell site list joined by mapped site/node and sector/cell IDs as the authoritative tower-coordinate source
+- Optional separate cell site list joined by mapped site/node and sector/cell IDs as the authoritative cell-site-coordinate source
 - Optional inclusive date/time range filtering during import
 - Named timezone and fixed UTC-offset handling
 - Human-readable TXT generation log with hashes, settings, row outcomes, and warnings
@@ -79,18 +79,24 @@ Each generation writes a `.kml`, `.geojson`, and `.txt` file with the same base 
 
 For original carrier records that do not match a template, the import wizard opens automatically. It supports CSV, XLS, and XLSX files; worksheet and header-row selection; record-type selection; explicit column mapping; and optional inclusive date/time range filtering. Date selections include the complete start and end days by default; select **Use exact times** for narrower boundaries. **Check Matching Rows** reports both timestamp matches and rows with valid mapped coordinates before import. The filter uses the selected display timezone when one is chosen; **No Change** keeps filtering in the source timezone. Boundaries and source records are converted to UTC for comparison. Timestamps that cannot be parsed or uniquely resolved are excluded, and all filter counts and boundaries are recorded in the TXT generation log. Its live preview shows the first 25 source rows with each original column header and the application field currently mapped to it. Azimuth may be left unmapped when it is unavailable; the application will use a 360-degree visualization. Imported records are normalized in memory and the original file is not modified.
 
-Tower/Sector and Distance from Tower imports can optionally use a separate cell site list. Enable **Use a separate cell site list**, drop or browse to the CSL, select its worksheet and header row, then map a two-part lookup: the original record's site/node ID and sector/cell ID to the corresponding CSL columns. Map CSL cell tower/site latitude, cell tower/site longitude, and optionally sector azimuth. While enabled, the corresponding original-record mappings are disabled and ignored; timestamp, lookup IDs, and Distance from tower still come from the original records. An unmatched lookup leaves the tower fields blank. Repeated lookup keys with equivalent mapped tower values are collapsed automatically. Conflicting duplicates stop the import only when the original records reference that key; the message identifies its site/node ID, sector/cell ID, CSL rows, and differing mapped fields. The TXT generation log records the CSL filename and hash, mappings, source policy, duplicate counts, and match outcomes without recording lookup-key values.
+Cell Site/Sector and Distance from Cell Site imports can optionally use a separate cell site list. Enable **Use a separate cell site list**, drop or browse to the CSL, select its worksheet and header row, then map a two-part lookup: the original record's site/node ID and sector/cell ID to the corresponding CSL columns. Map CSL cell site latitude, cell site longitude, and optionally sector azimuth. While enabled, the corresponding original-record mappings are disabled and ignored; timestamp, lookup IDs, and Distance from cell site still come from the original records. An unmatched lookup leaves the cell site fields blank. Repeated lookup keys with equivalent mapped cell site values are collapsed automatically. Conflicting duplicates stop the import only when the original records reference that key; the message identifies its site/node ID, sector/cell ID, CSL rows, and differing mapped fields. The TXT generation log records the CSL filename and hash, mappings, source policy, duplicate counts, and match outcomes without recording lookup-key values.
 
-Tower-based outputs also contain a separate **Reference Sites** record set that can be toggled independently. Without a CSL, it contains each unique tower coordinate used by the records. With a CSL, it contains the used sites plus unique CSL sites within the configured radius of any used site; the default radius is 25 miles. Sectors sharing one coordinate are combined into one dot. Reference dots show every contributing CSL spreadsheet row, the mapped site ID when available, and the source coordinates. If no CSL is used, they show the contributing original-record rows instead. They use the color selected under **Reference Cell Site Dots** and remain visible during timeline playback and date filtering.
+Cell-site-based outputs also contain a separate **Reference Cell Sites** record set that can be toggled independently. Without a CSL, it contains each unique cell site coordinate used by the records. With a CSL, it contains the used cell sites plus unique CSL cell sites within the configured radius of any used cell site; the default radius is 25 miles. Sectors sharing one coordinate are combined into one dot. Reference dots show every contributing CSL spreadsheet row, the mapped site ID when available, and the source coordinates. If no CSL is used, they show the contributing original-record rows instead. They use the color selected under **Reference Cell Site Dots** and remain visible during timeline playback and date filtering.
 
 The **Markers** tab accepts unlimited manual points or a dropped/browsed CSV, XLS, or XLSX marker list. Each valid row needs `Label`, `Latitude`, `Longitude`, and `Color`; colors may be familiar names such as `red`, `green`, `yellow`, `orange`, `blue`, `purple`, or `black`, or a `#RRGGBB` value. Invalid imported rows are skipped with row-specific status warnings. Markers are exported as a separate untimed record set, remain visible during timeline playback, and provide both whole-set and individual controls in GeoLibre. An enabled marker always shows its label, and its details include the label and source coordinates. Markers belong only to the current source record set: selecting or importing another source clears them, and they are not retained between application sessions.
 
+A small note at the top of Settings and Colors reminds you to hover over labels
+for more information. Hover over those labels to see their tooltips.
+**Nearby Cell Site Radius (miles)** applies only when using a separate cell
+site list: it selects nearby static reference dots, not coverage or event
+geometry. Without a CSL, the radius has no effect.
+
 ### Data Format Reference
 
-**For Tower/Sector Data:**
+**For Cell Site/Sector Data:**
 - `Timestamp`, `Latitude`, `Longitude`, `Azimuth`
 
-**For Distance from Tower Data:**
+**For Distance from Cell Site Data:**
 - `Timestamp`, `Latitude`, `Longitude`, `Azimuth`, `Distance`
 
 **For Location Point Data:**
@@ -115,12 +121,13 @@ The application supports **18+ timestamp formats**, including:
 **Advanced Formats:**
 - Excel serial dates: `45696.7637037037`
 - With timezone: `2025-02-11 11:06:07.557 EST`, `2019/05/03 18:36:04 (GMT -4)`, `2025-01-15T14:30:00Z` (converted to UTC for KML)
-- Without timezone: Uses the selected Source Timestamp UTC Offset (UTC by default); an explicit offset in a record takes precedence
+- Without timezone: Uses the selected source timezone, either a named timezone or a fixed UTC offset (UTC by default); an explicit offset in a record takes precedence
 - Fixed offsets are shown with familiar North American abbreviations where useful; the numeric UTC offset is authoritative because abbreviations can be ambiguous
-- Ambiguous slash or dash dates use the selected Month/Day/Year or Day/Month/Year order; year-first dates are unaffected
-- Named timezones apply historical daylight-saving rules. Ambiguous or nonexistent transition times are omitted from KML and reported by data-row number rather than assigned an assumed instant
+- Slash or dash dates use the selected Month-Day-Year or Day-Month-Year order; year-first dates use Year-Month-Day unless Year-Day-Month is selected. Review the wizard's suggested date order before import
+- Named timezones apply historical daylight-saving rules. Ambiguous or nonexistent transition times are omitted from both KML and GeoJSON and reported by data-row number rather than assigned an assumed instant
+- Fractional seconds in text timestamps are discarded. Time-only entries use today's date; verify that this matches the source records before use
 
-**Note:** Data sets with missing azimuth, distance, or accuracy values will still process. The visualizations will reflect only the data provided, and alert messages will notify you of any missing fields.
+**Missing-data outcomes:** Missing azimuth uses a 360-degree visualization; missing distance omits the distance band; missing Location Point accuracy uses the configured default (initially 0). With a zero default, missing accuracy produces a visible point without an accuracy circle in both KML and GeoJSON. Supplied zero accuracy also produces a point without a circle: zero means unknown accuracy, not an exact location. Positive supplied accuracy still produces a circle; a positive configured default is a visualization assumption, not measured accuracy. Invalid accuracy produces a point without an accuracy circle. These defaults and omissions are summarized in warnings and the TXT log and must be independently verified. Exported records remain initially hidden until enabled in the viewer.
 
 
 ---
@@ -187,12 +194,23 @@ timezone and XLS support, bundled GeoLibre viewer and plugin, and license files.
 
 Location-data processing and export run locally; the application does not upload source or output files. Marker entry is coordinate-only: the application does not send addresses to an online geocoding service. Generated KML, GeoJSON, TXT, and GeoLibre project files can contain sensitive information and should be handled together. The GeoLibre project does not duplicate source records, but it contains the GeoJSON's absolute path, dataset name or identifier, and map extent. The included viewer loads its default basemap from OpenFreeMap, which requires a network connection and discloses ordinary tile-request metadata such as IP address and viewed map area to that service. Opening project links or exported files in other applications is subject to those applications' behavior.
 
+## Troubleshooting
+
+- **Slow KML viewing:** Try the paired GeoJSON in the included GeoLibre viewer using **Process and Open in Viewer**, or **Open Viewer** followed by **Load GeoJSON**. GeoJSON is optimized for this viewer workflow and may provide smoother interaction; performance still depends on dataset size, geometry, and hardware. Limit the imported date/time range or process smaller subsets if generation or viewing remains slow.
+- **Data loaded but nothing visible:** GeoLibre starts records hidden. Enable individual events or use **Show All** for the record set, check any active **From/Through** filter, then use **Focus Set**. Reference-site dots and markers have separate controls.
+- **Viewer will not start:** Close other GeoLibre windows before starting the included viewer; only one instance can run per Windows session. Review the status console or error dialog for remaining launch problems.
+- **Missing records or unexpected times:** Review source/display timezones, date order, timestamp mappings, coordinates, cell-site-list matches, and import filters. Check summarized warnings and TXT-log row outcomes. Invalid timestamps can leave valid geometry untimed, but missing Location Point timestamps and DST-ambiguous/nonexistent times are omitted; active import date/time filters exclude timestamps that cannot be resolved.
+
+Processing and export are local. External viewers, map services, and opened links have their own network and privacy behavior; do not assume they are offline.
+
 ## Important Disclaimers
+
+At startup, the main program window appears behind the **Important Disclaimers & Usage Information** dialog. Click **Close** or the dialog's window close button to dismiss the information and use the program. The dialog appears on every startup and can be reopened with the information button.
 
 - **This tool is in continuous development and may contain errors.**
 - **This tool is designed for quick preliminary review and visualization. All outputs require verification.**
 - **NO COVERAGE ESTIMATIONS**: All shaded areas, wedges, and circles are visual representations only - NOT coverage depictions
-- Distance from tower measurements, sector areas, and location accuracy should all be independently validated
+- Distance from cell site measurements, sector areas, and location accuracy should all be independently validated
 - This tool does not replace professional forensic analysis or expert work
 
 ## Sample Data Templates
@@ -210,5 +228,5 @@ This program is distributed in the hope that it will be useful, but WITHOUT ANY 
 
 ---
 Copyright (c) 2025-2026 CrimLawTech LLC
-**Version 1.3.0-beta.1**
+**Version 2.0.0-beta.1**
 _Open Source Location Data Visualization Tool_

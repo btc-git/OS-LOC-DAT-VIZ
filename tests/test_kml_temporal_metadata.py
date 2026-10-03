@@ -363,7 +363,7 @@ class KMLTemporalMetadataTests(unittest.TestCase):
         )
         event_title = '01/15/2024, 9:00:00 AM'
         self.assertEqual(
-            f'{event_title} - Site Alpha / Cell C-7',
+            f'{event_title} - Cell Site Alpha / Cell C-7',
             first_metadata.get('osloc_event_label'),
         )
         self.assertEqual(
@@ -546,7 +546,7 @@ class KMLTemporalMetadataTests(unittest.TestCase):
         self.assertIn('$[name]', style_text)
 
         self.assertIn('<table', description)
-        self.assertIn('<b>Tower:</b>', description)
+        self.assertIn('<b>Cell Site:</b>', description)
         self.assertIn('<b>Azimuth:</b>', description)
         self.assertIn('<b>Sector Width:</b>', description)
         self.assertIn('<b>Distance:</b>', description)
@@ -955,7 +955,7 @@ class KMLTemporalMetadataTests(unittest.TestCase):
 
         self.assertEqual(1, len(folders))
         dataset_folder = folders[0]
-        self.assertEqual('Tower/Sector Data', dataset_folder.findtext('kml:name', namespaces=KML_NAMESPACE))
+        self.assertEqual('Cell Site/Sector Data', dataset_folder.findtext('kml:name', namespaces=KML_NAMESPACE))
         self.assertEqual(2, len(dataset_folder.findall('kml:Placemark', KML_NAMESPACE)))
         self.assertEqual([], dataset_folder.findall('kml:Folder', KML_NAMESPACE))
 

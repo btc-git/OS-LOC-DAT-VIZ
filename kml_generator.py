@@ -29,6 +29,18 @@ PRELIMINARY_REVIEW_NOTICE = (
     "and generated geometry require independent expert verification."
 )
 
+DATA_TYPE_LABELS = {
+    'Tower/Sector': 'Cell Site/Sector',
+    'Distance from Tower': 'Distance from Cell Site',
+    'Location Point': 'Location Point',
+}
+
+
+def data_type_label(data_type: str) -> str:
+    """Display record types without changing compatibility identifiers."""
+    return DATA_TYPE_LABELS.get(data_type, data_type)
+
+
 EVENT_TYPES = {
     'tower_sector': 'tower_sector',
     'tower_sector_distance': 'tower_sector_distance',
@@ -228,7 +240,7 @@ class KMLGenerator(QThread):
         """Return a stable second dataset identity for static site points."""
         if not self.export_metadata:
             self.begin_export(dataset_name)
-        reference_name = f"{dataset_name} - Reference Sites"
+        reference_name = f"{dataset_name} - Reference Cell Sites"
         reference_id = uuid5(
             UUID(self.export_metadata['osloc_dataset_id']), 'reference-sites'
         )
@@ -853,8 +865,8 @@ class KMLGenerator(QThread):
         site_ids = site['site_ids']
         site_ids_text = ', '.join(site_ids) if site_ids else None
         title = (
-            f"Site {site_ids_text}"
-            if site_ids else f"Reference Site {position + 1}"
+            f"Cell Site {site_ids_text}"
+            if site_ids else f"Reference Cell Site {position + 1}"
         )
         coordinate_text = self.source_coord_pair_text(
             site['latitude'], site['longitude'], site['latitude_text'],
@@ -1026,9 +1038,9 @@ class KMLGenerator(QThread):
         return (sector_width / 360.0) * math.pi * ((outer_radius ** 2) - (inner_radius ** 2))
     
     def generate_cell_tower_kml(self, df):
-        """Generate KML for tower/sector data"""
+        """Generate KML for site/sector data"""
         # Use custom label if provided, otherwise default
-        dataset_name = self.settings.get('custom_label') or "Tower/Sector Data"
+        dataset_name = self.settings.get('custom_label') or "Cell Site/Sector Data"
         kml_header = self.create_kml_header(dataset_name)
         
         kml_footer = textwrap.dedent('''\
@@ -1093,13 +1105,13 @@ class KMLGenerator(QThread):
         
         # Report missing azimuth data
         if missing_azimuth_count > 0:
-            self.status_message.emit(f"⚠️ Tower/Sector Data: {missing_azimuth_count} points had no azimuth data - used 360° visualization circles")
+            self.status_message.emit(f"⚠️ Cell Site/Sector Data: {missing_azimuth_count} points had no azimuth data - used 360° visualization circles")
         if invalid_coordinate_count > 0:
-            self.status_message.emit(f"⚠️ Tower/Sector Data: {invalid_coordinate_count} rows were skipped because latitude or longitude was missing or invalid")
+            self.status_message.emit(f"⚠️ Cell Site/Sector Data: {invalid_coordinate_count} rows were skipped because latitude or longitude was missing or invalid")
         self.report_untimed_timestamps(
-            "Tower/Sector Data", untimed_timestamp_rows
+            "Cell Site/Sector Data", untimed_timestamp_rows
         )
-        self.report_dst_conflicts("Tower/Sector Data", dst_conflict_rows)
+        self.report_dst_conflicts("Cell Site/Sector Data", dst_conflict_rows)
         self.audit_summary = {
             'input_rows': total_rows,
             'generated_rows': generated_count,
@@ -1113,7 +1125,7 @@ class KMLGenerator(QThread):
         self.audit_summary.update(self._reference_site_stats)
         if self.settings.get('include_reference_sites', False):
             self.status_message.emit(
-                f"📊 Reference Sites: generated {len(reference_sites)} static "
+                f"📊 Reference Cell Sites: generated {len(reference_sites)} static "
                 f"site {'point' if len(reference_sites) == 1 else 'points'} from "
                 f"{self._reference_site_stats['reference_site_source']}"
             )
@@ -1129,9 +1141,9 @@ class KMLGenerator(QThread):
         return kml_header + body + reference_body + marker_body + kml_footer
     
     def generate_distance_from_tower_kml(self, df):
-        """Generate KML for distance from tower data with arc visualization"""
+        """Generate KML for distance from site data with arc visualization"""
         # Use custom label if provided, otherwise default
-        dataset_name = self.settings.get('custom_label') or "Distance from Tower Analysis"
+        dataset_name = self.settings.get('custom_label') or "Distance from Cell Site Analysis"
         kml_header = self.create_kml_header(dataset_name)
         
         kml_footer = textwrap.dedent('''\
@@ -1179,7 +1191,7 @@ class KMLGenerator(QThread):
             
             try:
                 if has_azimuth and has_distance:
-                    # Case 1: Has both azimuth and distance - create combined tower/sector + distance arc visualization
+                    # Case 1: Has both azimuth and distance - create combined site/sector + distance arc visualization
                     distance_miles = self.convert_ta_distance_to_miles(distance, self.settings.get('ta_distance_units', 'Meters'))
                     event_metadata = self.create_event_metadata(
                         idx, timestamp, EVENT_TYPES['tower_sector_distance'], row
@@ -1230,15 +1242,15 @@ class KMLGenerator(QThread):
         
         # Report missing data
         if missing_azimuth_count > 0:
-            self.status_message.emit(f"⚠️ Distance from Tower Data: {missing_azimuth_count} points had no azimuth data - used 360° visualization areas")
+            self.status_message.emit(f"⚠️ Distance from Cell Site Data: {missing_azimuth_count} points had no azimuth data - used 360° visualization areas")
         if missing_distance_count > 0:
-            self.status_message.emit(f"⚠️ Distance from Tower Data: {missing_distance_count} points had no distance data - distance from tower not drawn")
+            self.status_message.emit(f"⚠️ Distance from Cell Site Data: {missing_distance_count} points had no distance data - distance from cell site not drawn")
         if invalid_coordinate_count > 0:
-            self.status_message.emit(f"⚠️ Distance from Tower Data: {invalid_coordinate_count} rows were skipped because latitude or longitude was missing or invalid")
+            self.status_message.emit(f"⚠️ Distance from Cell Site Data: {invalid_coordinate_count} rows were skipped because latitude or longitude was missing or invalid")
         self.report_untimed_timestamps(
-            "Distance from Tower Data", untimed_timestamp_rows
+            "Distance from Cell Site Data", untimed_timestamp_rows
         )
-        self.report_dst_conflicts("Distance from Tower Data", dst_conflict_rows)
+        self.report_dst_conflicts("Distance from Cell Site Data", dst_conflict_rows)
         self.audit_summary = {
             'input_rows': total_rows,
             'generated_rows': generated_count,
@@ -1252,7 +1264,7 @@ class KMLGenerator(QThread):
         self.audit_summary.update(self._reference_site_stats)
         if self.settings.get('include_reference_sites', False):
             self.status_message.emit(
-                f"📊 Reference Sites: generated {len(reference_sites)} static "
+                f"📊 Reference Cell Sites: generated {len(reference_sites)} static "
                 f"site {'point' if len(reference_sites) == 1 else 'points'} from "
                 f"{self._reference_site_stats['reference_site_source']}"
             )
@@ -1282,6 +1294,7 @@ class KMLGenerator(QThread):
         total_rows = len(df)
         missing_accuracy_count = 0
         invalid_accuracy_count = 0
+        zero_accuracy_count = 0
         invalid_coordinate_count = 0
         missing_timestamp_count = 0
         dst_conflict_rows = []
@@ -1305,23 +1318,15 @@ class KMLGenerator(QThread):
                 continue
             lat, lon, lat_source_text, lon_source_text = coordinates
             
-            # Convert location point accuracy to miles for consistent circle size
-            accuracy_display = None
-            if pd.isna(gps_accuracy):
+            radius_miles, accuracy_display, accuracy_outcome = (
+                self.resolve_location_accuracy(gps_accuracy)
+            )
+            if accuracy_outcome == 'missing':
                 missing_accuracy_count += 1
-                # Use configurable default radius from settings with proper units
-                default_accuracy = self.settings.get('default_accuracy', 100)
-                default_units = self.settings.get('gps_units', 'Meters')
-                radius_miles = self.convert_gps_accuracy_to_miles(default_accuracy, default_units)
-                accuracy_display = f"{default_accuracy} {default_units} (default)"
-            else:
-                try:
-                    radius_miles = self.convert_gps_accuracy_to_miles(gps_accuracy, self.settings.get('gps_units', 'Meters'))
-                    accuracy_display = f"{gps_accuracy} {self.settings.get('gps_units', 'Meters')}"
-                except (ValueError, TypeError):
-                    invalid_accuracy_count += 1
-                    radius_miles = None
-                    accuracy_display = f"{gps_accuracy} ({self.settings.get('gps_units', 'Meters')}, invalid)"
+            elif accuracy_outcome == 'invalid':
+                invalid_accuracy_count += 1
+            elif accuracy_outcome == 'zero':
+                zero_accuracy_count += 1
             
             # Create location point accuracy circle
             try:
@@ -1345,11 +1350,16 @@ class KMLGenerator(QThread):
         
         # Report missing accuracy data
         if missing_accuracy_count > 0:
-            default_accuracy = self.settings.get('default_accuracy', 100)
+            default_accuracy = self.settings.get('default_accuracy', 0)
             default_units = self.settings.get('gps_units', 'Meters')
-            self.status_message.emit(f"⚠️ Location Point Data: {missing_accuracy_count} points had no accuracy data - used {default_accuracy} {default_units.lower()} default radius")
+            if float(default_accuracy) == 0:
+                self.status_message.emit(f"⚠️ Location Point Data: {missing_accuracy_count} points had no accuracy data - accuracy unknown; displayed as points without accuracy circles")
+            else:
+                self.status_message.emit(f"⚠️ Location Point Data: {missing_accuracy_count} points had no accuracy data - used {default_accuracy} {default_units.lower()} default radius")
         if invalid_accuracy_count > 0:
             self.status_message.emit(f"⚠️ Location Point Data: {invalid_accuracy_count} points had invalid accuracy data - displayed as points without accuracy circles")
+        if zero_accuracy_count > 0:
+            self.status_message.emit(f"⚠️ Location Point Data: {zero_accuracy_count} points had zero accuracy data - accuracy unknown, not exact; displayed as points without accuracy circles")
         if invalid_coordinate_count > 0:
             self.status_message.emit(f"⚠️ Location Point Data: {invalid_coordinate_count} rows were skipped because latitude or longitude was missing or invalid")
         if missing_timestamp_count > 0:
@@ -1376,6 +1386,30 @@ class KMLGenerator(QThread):
         self.report_marker_summary()
         return kml_header + body + marker_body + kml_footer
     
+    def resolve_location_accuracy(self, accuracy_value):
+        units = self.settings.get('gps_units', 'Meters')
+        if pd.isna(accuracy_value):
+            default_accuracy = self.settings.get('default_accuracy', 0)
+            radius_miles = self.convert_gps_accuracy_to_miles(default_accuracy, units)
+            accuracy_display = (
+                'Unknown (no accuracy supplied; default 0, no accuracy circle)'
+                if radius_miles == 0
+                else f"{default_accuracy} {units} (default)"
+            )
+            outcome = 'missing'
+        else:
+            try:
+                radius_miles = self.convert_gps_accuracy_to_miles(accuracy_value, units)
+            except (ValueError, TypeError):
+                return None, f"{accuracy_value} ({units}, invalid)", 'invalid'
+            accuracy_display = (
+                f"Unknown (supplied {accuracy_value} {units}; zero does not mean exact)"
+                if radius_miles == 0
+                else f"{accuracy_value} {units}"
+            )
+            outcome = 'zero' if radius_miles == 0 else 'supplied'
+        return (radius_miles if radius_miles > 0 else None), accuracy_display, outcome
+
     def convert_gps_accuracy_to_miles(self, accuracy_value, units):
         """Convert location point accuracy from various units to miles"""
         accuracy_float = float(accuracy_value)
@@ -1458,7 +1492,7 @@ class KMLGenerator(QThread):
         point_description = self.build_description_table([
             ('Location', source_pair),
             ('Accuracy', accuracy_display),
-            ('Point Visibility', 'Visible because supplied accuracy was missing or invalid' if radius_miles is None else 'Hidden anchor for circle event'),
+            ('Point Visibility', 'Visible because accuracy is unknown, zero, or invalid' if radius_miles is None else 'Hidden anchor for circle event'),
         ], event_metadata['source_row'])
         placemark += textwrap.dedent(f'''\
                 <Placemark>
@@ -2016,8 +2050,12 @@ class KMLGenerator(QThread):
             return display_label
 
         identifier_groups = [
-            ('Site', ['Site', 'Site Name', 'Site ID']),
-            ('Tower', ['Tower', 'Tower Name', 'Tower ID']),
+            (
+                'Cell Site',
+                ['Cell Site', 'Cell Site Name', 'Cell Site ID',
+                 'Site', 'Site Name', 'Site ID'],
+            ),
+            ('Cell Site', ['Tower', 'Tower Name', 'Tower ID']),
             ('Cell', ['Cell', 'Cell Name', 'Cell ID']),
             ('Sector', ['Sector', 'Sector Name', 'Sector ID']),
             ('Location', ['Location', 'Location Name', 'Label', 'Name']),
@@ -2073,7 +2111,7 @@ class KMLGenerator(QThread):
     def create_extended_data(self, event_metadata, component_type, indent="        "):
         """Create shared identity and optional temporal feature attributes."""
         if not self.export_metadata:
-            self.begin_export(self.settings.get('custom_label') or self.data_type)
+            self.begin_export(self.settings.get('custom_label') or data_type_label(self.data_type))
         values = list(self.export_metadata.items())
         is_anchor = self.is_event_metadata_anchor(event_metadata, component_type)
         time_range = event_metadata['time_range']
@@ -2306,7 +2344,7 @@ class KMLGenerator(QThread):
         return properties
 
     def generate_cell_tower_geojson(self, df):
-        dataset_name = self.settings.get('custom_label') or "Tower/Sector Data"
+        dataset_name = self.settings.get('custom_label') or "Cell Site/Sector Data"
         features = []
 
         for idx, (_, row) in enumerate(df.iterrows()):
@@ -2350,7 +2388,7 @@ class KMLGenerator(QThread):
         return self.create_geojson_collection(dataset_name, features)
 
     def generate_distance_from_tower_geojson(self, df):
-        dataset_name = self.settings.get('custom_label') or "Distance from Tower Analysis"
+        dataset_name = self.settings.get('custom_label') or "Distance from Cell Site Analysis"
         features = []
 
         for idx, (_, row) in enumerate(df.iterrows()):
@@ -2438,22 +2476,9 @@ class KMLGenerator(QThread):
                 continue
             lat, lon, lat_source_text, lon_source_text = coordinates
 
-            if pd.isna(gps_accuracy):
-                default_accuracy = self.settings.get('default_accuracy', 100)
-                default_units = self.settings.get('gps_units', 'Meters')
-                radius_miles = self.convert_gps_accuracy_to_miles(default_accuracy, default_units)
-                accuracy_display = f"{default_accuracy} {default_units} (default)"
-            else:
-                try:
-                    radius_miles = self.convert_gps_accuracy_to_miles(
-                        gps_accuracy, self.settings.get('gps_units', 'Meters')
-                    )
-                    accuracy_display = f"{gps_accuracy} {self.settings.get('gps_units', 'Meters')}"
-                except (ValueError, TypeError):
-                    radius_miles = None
-                    accuracy_display = (
-                        f"{gps_accuracy} ({self.settings.get('gps_units', 'Meters')}, invalid)"
-                    )
+            radius_miles, accuracy_display, _ = self.resolve_location_accuracy(
+                gps_accuracy
+            )
 
             try:
                 event_type = (
@@ -2519,7 +2544,7 @@ class KMLGenerator(QThread):
             lat, lon, lat_source_text, lon_source_text
         )
         sector_description = self.build_description_table([
-            ('Tower', source_pair),
+            ('Cell Site', source_pair),
             ('Azimuth', f"{azimuth}°"),
             ('Sector Width', f"{self.settings['azimuth_spread']}°"),
             ('Sector Length', f"{self.settings['shaded_area_length']} miles"),
@@ -2592,7 +2617,7 @@ class KMLGenerator(QThread):
         # Left directional line
         left_lat, left_lon = self.destination_point(lat, lon, start_angle, leg_length)
         left_description = self.build_description_table([
-            ('Tower', source_pair),
+            ('Cell Site', source_pair),
             ('Azimuth', f"{azimuth}°"),
             ('Leg Direction', f"{start_angle:.2f}°"),
             ('Leg Length', f"{leg_length} miles"),
@@ -2622,7 +2647,7 @@ class KMLGenerator(QThread):
         # Right directional line
         right_lat, right_lon = self.destination_point(lat, lon, end_angle, leg_length)
         right_description = self.build_description_table([
-            ('Tower', source_pair),
+            ('Cell Site', source_pair),
             ('Azimuth', f"{azimuth}°"),
             ('Leg Direction', f"{end_angle:.2f}°"),
             ('Leg Length', f"{leg_length} miles"),
@@ -2661,7 +2686,7 @@ class KMLGenerator(QThread):
             lat, lon, lat_source_text, lon_source_text
         )
         circle_description = self.build_description_table([
-            ('Tower', source_pair),
+            ('Cell Site', source_pair),
             ('Visualization Radius', f"{self.settings['shaded_area_length']} miles"),
             ('Reason', 'Azimuth not available; using 360° visualization circle'),
         ], event_metadata['source_row'])
@@ -2751,7 +2776,7 @@ class KMLGenerator(QThread):
     def create_combined_sector_and_arc(self, lat, lon, azimuth, distance_miles,
                                        event_metadata, lat_source_text=None,
                                        lon_source_text=None):
-        """Create combined tower/sector visualization with distance arc in a single folder"""
+        """Create combined site/sector visualization with distance arc in a single folder"""
         event_title = event_metadata['title']
         time_range = event_metadata['time_range']
         source_pair = self.source_coord_pair_text(
@@ -2790,7 +2815,7 @@ class KMLGenerator(QThread):
         placemark += self.create_time_element(time_range)
 
         description_html = self.build_description_table([
-            ('Tower', source_pair),
+            ('Cell Site', source_pair),
             ('Azimuth', f"{azimuth}°"),
             ('Sector Width', f"{azimuth_spread}°"),
             ('Distance', f"{distance_miles:.2f} miles"),
@@ -2839,7 +2864,7 @@ class KMLGenerator(QThread):
         # 2. Create left directional line
         left_lat, left_lon = self.destination_point(lat, lon, start_angle, leg_length)
         left_description = self.build_description_table([
-            ('Tower', source_pair),
+            ('Cell Site', source_pair),
             ('Azimuth', f"{azimuth}°"),
             ('Leg Direction', f"{start_angle:.2f}°"),
             ('Leg Length', f"{leg_length} miles"),
@@ -2870,7 +2895,7 @@ class KMLGenerator(QThread):
         # 3. Create right directional line
         right_lat, right_lon = self.destination_point(lat, lon, end_angle, leg_length)
         right_description = self.build_description_table([
-            ('Tower', source_pair),
+            ('Cell Site', source_pair),
             ('Azimuth', f"{azimuth}°"),
             ('Leg Direction', f"{end_angle:.2f}°"),
             ('Leg Length', f"{leg_length} miles"),
@@ -2909,7 +2934,7 @@ class KMLGenerator(QThread):
         placemark += textwrap.dedent(f'''\
                 <Placemark>
                     <name>{event_title}</name>
-                    <description><![CDATA[{self.build_description_table([('Tower', source_pair), ('Distance', f"{distance_miles:.2f} miles")], event_metadata['source_row'])}]]></description>
+                    <description><![CDATA[{self.build_description_table([('Cell Site', source_pair), ('Distance', f"{distance_miles:.2f} miles")], event_metadata['source_row'])}]]></description>
                     <Snippet maxLines="0"></Snippet>
         ''')
         
@@ -2968,7 +2993,7 @@ class KMLGenerator(QThread):
             <Placemark>
                 <name>{event_title} - Distance band</name>
                 <description><![CDATA[{self.build_description_table([
-                    ('Tower', self.source_coord_pair_text(lat, lon, lat_source_text, lon_source_text)),
+                    ('Cell Site', self.source_coord_pair_text(lat, lon, lat_source_text, lon_source_text)),
                     ('Azimuth Span', f"{start_angle:.2f}° to {end_angle:.2f}°"),
                     ('Distance', f"{distance_miles:.2f} miles"),
                     ('Band Inner', f"{inner_distance_miles:.2f} miles"),
@@ -3007,7 +3032,7 @@ class KMLGenerator(QThread):
             <Placemark>
                 <name>{event_title} - Reported distance</name>
                 <description><![CDATA[{self.build_description_table([
-                    ('Tower', self.source_coord_pair_text(lat, lon, lat_source_text, lon_source_text)),
+                    ('Cell Site', self.source_coord_pair_text(lat, lon, lat_source_text, lon_source_text)),
                     ('Azimuth Span', f"{start_angle:.2f}° to {end_angle:.2f}°"),
                     ('Reported Distance', f"{distance_miles:.2f} miles"),
                 ], event_metadata['source_row'])}]]></description>
@@ -3032,7 +3057,7 @@ class KMLGenerator(QThread):
     
     def create_distance_band(self, lat, lon, distance_miles, event_metadata,
                              lat_source_text=None, lon_source_text=None):
-        """Create a band polygon at the distance from tower (inner arc + outer arc + edges)"""
+        """Create a band polygon at the distance from site (inner arc + outer arc + edges)"""
         event_title = event_metadata['title']
         time_range = event_metadata['time_range']
         source_pair = self.source_coord_pair_text(
@@ -3084,7 +3109,7 @@ class KMLGenerator(QThread):
                 <Placemark>
                     <name>{event_title}</name>
                     <description><![CDATA[{self.build_description_table([
-                        ('Tower', source_pair),
+                        ('Cell Site', source_pair),
                         ('Reported Distance', f"{distance_miles:.2f} miles"),
                         ('Band Inner', f"{inner_distance_miles:.2f} miles"),
                         ('Band Outer', f"{outer_distance_miles:.2f} miles"),
@@ -3115,7 +3140,7 @@ class KMLGenerator(QThread):
                 <Placemark>
                     <name>{event_title} - Reported distance</name>
                     <description><![CDATA[{self.build_description_table([
-                        ('Tower', source_pair),
+                        ('Cell Site', source_pair),
                         ('Reported Distance', f"{distance_miles:.2f} miles"),
                     ], event_metadata['source_row'])}]]></description>
                     <Snippet maxLines="0"></Snippet>
@@ -3140,7 +3165,7 @@ class KMLGenerator(QThread):
                 <Placemark>
                     <name>{event_title}</name>
                     <description><![CDATA[{self.build_description_table([
-                        ('Tower', source_pair),
+                        ('Cell Site', source_pair),
                         ('Reported Distance', f"{distance_miles:.2f} miles"),
                     ], event_metadata['source_row'])}]]></description>
                     <Snippet maxLines="0"></Snippet>
@@ -3162,7 +3187,7 @@ class KMLGenerator(QThread):
         return placemark
     
     def convert_ta_distance_to_miles(self, distance, units):
-        """Convert distance from tower distance to miles based on user-selected units"""
+        """Convert distance from site distance to miles based on user-selected units"""
         distance_float = float(distance)
         if not math.isfinite(distance_float) or distance_float < 0:
             raise ValueError("Distance must be a non-negative finite number")

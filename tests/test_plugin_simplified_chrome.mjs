@@ -53,6 +53,16 @@ const pluginModule = await import(
     `data:text/javascript;base64,${Buffer.from(pluginSource).toString("base64")}`
 );
 const plugin = pluginModule.default;
+
+assert.equal(pluginModule.humanizeEventType("tower_sector"), "Cell Site/Sector");
+assert.equal(
+    pluginModule.humanizeEventType("tower_sector_distance"),
+    "Cell Site/Sector + distance",
+);
+assert.equal(
+    pluginModule.humanizeEventType("tower_no_azimuth"),
+    "Cell Site / no azimuth",
+);
 const {
     eventDisplayMinute,
     eventMatchesDateTimeBounds,

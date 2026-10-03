@@ -20,8 +20,8 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QMessageBox, QTabWidget, QCheckBox, QMenu, QComboBox,
                              QLineEdit, QFrame, QScrollArea, QTableWidget,
                              QTableWidgetItem, QHeaderView, QStyle)
-from PyQt6.QtCore import Qt, QSettings, pyqtSignal
-from PyQt6.QtGui import QFont, QColor, QIcon, QPixmap, QPainter, QPen
+from PyQt6.QtCore import Qt, QSettings, QTimer, pyqtSignal
+from PyQt6.QtGui import QFont, QColor, QIcon, QPixmap, QPainter, QPen, QShowEvent
 
 from dialogs import DisclaimerDialog
 from geolibre_launcher import GeoLibreLaunchWorker
@@ -34,7 +34,7 @@ from import_wizard import (
     timezone_choice_data,
 )
 from widgets import DragDropWidget, MarkerTableWidget
-from kml_generator import KMLGenerator
+from kml_generator import KMLGenerator, data_type_label
 from version import APP_VERSION
 
 
@@ -86,8 +86,7 @@ class MainWindow(QMainWindow):
         self.setup_ui()
         self.apply_dark_theme()
         
-        # Show disclaimer dialog on startup
-        self.show_disclaimer_dialog()
+        self._startup_disclaimer_scheduled = False
         
         # Add welcome message
         self.add_status_message("Drag and drop a CSV or Excel file, or click 'Browse for File', to get started.")
@@ -98,11 +97,18 @@ class MainWindow(QMainWindow):
 
 
     
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        if not self._startup_disclaimer_scheduled:
+            self._startup_disclaimer_scheduled = True
+            # Let the main window finish showing before entering the modal dialog.
+            QTimer.singleShot(0, self.show_disclaimer_dialog)
+
     def show_disclaimer_dialog(self):
         """Show the disclaimer dialog"""
         dialog = DisclaimerDialog(self)
         dialog.exec()
-    
+
     def handle_footer_link(self, link):
         """Handle clicks on footer links"""
         if link == "license://show":
@@ -238,8 +244,8 @@ class MainWindow(QMainWindow):
         data_type_layout.addWidget(detection_label)
         
         self.data_type_group = QButtonGroup()
-        self.tower_radio = QRadioButton("Tower/Sector Data")
-        self.ta_radio = QRadioButton("Distance from Tower Data")
+        self.tower_radio = QRadioButton("Cell Site/Sector Data")
+        self.ta_radio = QRadioButton("Distance from Cell Site Data")
         self.gps_radio = QRadioButton("Location Point Data")
         
         # Make radio buttons (read-only display)
@@ -291,18 +297,22 @@ class MainWindow(QMainWindow):
         viz_layout = QGridLayout(viz_tab)
         viz_layout.setVerticalSpacing(8)  # Compact spacing for Settings controls
         
-        row = 0
+        settings_help_hint = QLabel("Hover over labels for more information.")
+        settings_help_hint.setStyleSheet("color: #aaaaaa; font-size: 12px;")
+        viz_layout.addWidget(settings_help_hint, 0, 0, 1, 2)
+
+        row = 1
         
-        # ============ TOWER/SECTOR SETTINGS ============
-        tower_label = QLabel("Tower/Sector Settings")
+        # ============ SITE/SECTOR SETTINGS ============
+        tower_label = QLabel("Cell Site/Sector Settings")
         tower_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         tower_label.setStyleSheet("color: #4ecdc4; font-weight: bold; font-size: 14px;")
         viz_layout.addWidget(tower_label, row, 0, 1, 2)
         row += 1
         
         # Leg length
-        leg_length_label = QLabel("Tower/Sector Leg Length (miles):")
-        leg_length_label.setToolTip("Length of the lines extending from the tower")
+        leg_length_label = QLabel("Cell Site/Sector Leg Length (miles):")
+        leg_length_label.setToolTip("Length of the lines extending from the cell site")
         viz_layout.addWidget(leg_length_label, row, 0)
         self.leg_length_spinbox = QDoubleSpinBox()
         self.leg_length_spinbox.setRange(0.5, 20.0)
@@ -312,7 +322,7 @@ class MainWindow(QMainWindow):
         row += 1
         
         # Shaded area length
-        shaded_area_label = QLabel("Tower/Sector Shaded Area Length (miles):")
+        shaded_area_label = QLabel("Cell Site/Sector Shaded Area Length (miles):")
         shaded_area_label.setToolTip("Length of the shaded wedge (can be shorter or equal to leg length)")
         viz_layout.addWidget(shaded_area_label, row, 0)
         self.shaded_area_spinbox = QDoubleSpinBox()
@@ -323,8 +333,8 @@ class MainWindow(QMainWindow):
         row += 1
         
         # Shaded area azimuth and width
-        azimuth_label = QLabel("Tower/Sector Width (degrees):")
-        azimuth_label.setToolTip("Angular width of the tower sector shaded area")
+        azimuth_label = QLabel("Cell Site/Sector Width (degrees):")
+        azimuth_label.setToolTip("Angular width of the cell site sector shaded area")
         viz_layout.addWidget(azimuth_label, row, 0)
         self.azimuth_spinbox = QSpinBox()
         self.azimuth_spinbox.setRange(30, 360)
@@ -334,8 +344,12 @@ class MainWindow(QMainWindow):
 
         reference_radius_label = QLabel("Nearby Cell Site Radius (miles):")
         reference_radius_label.setToolTip(
-            "With a cell site list, include unique sites within this distance "
-            "of a tower used by the imported records"
+            "Only applies when using a separate cell site list (CSL). "
+            "Includes unique CSL cell sites within this distance of any cell site "
+            "used by the imported records, as static Reference Cell Site dots. "
+            "Without a CSL, only the cell sites in your records are shown and "
+            "this radius has no effect. It does not change sector geometry, "
+            "distance bands, or accuracy circles, and does not estimate coverage."
         )
         viz_layout.addWidget(reference_radius_label, row, 0)
         self.reference_site_radius_spinbox = QDoubleSpinBox()
@@ -353,20 +367,20 @@ class MainWindow(QMainWindow):
         viz_layout.addWidget(separator1, row, 0, 1, 2)
         row += 1
         
-        # ============ DISTANCE FROM TOWER SETTINGS ============
-        ta_label = QLabel("Distance from Tower Settings")
+        # ============ DISTANCE FROM SITE SETTINGS ============
+        ta_label = QLabel("Distance from Cell Site Settings")
         ta_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         ta_label.setStyleSheet("color: #4ecdc4; font-weight: bold; font-size: 14px;")
         viz_layout.addWidget(ta_label, row, 0, 1, 2)
         row += 1
         
-        # Distance from Tower units dropdown
-        ta_distance_units_label = QLabel("Distance from Tower Units:")
-        ta_distance_units_label.setToolTip("Select the units used for distance from tower in your data")
+        # Distance from Site units dropdown
+        ta_distance_units_label = QLabel("Distance from Cell Site Units:")
+        ta_distance_units_label.setToolTip("Select the units used for distance from cell site in your data")
         viz_layout.addWidget(ta_distance_units_label, row, 0)
         self.ta_distance_units_combo = QComboBox()
         self.ta_distance_units_combo.addItems(["Meters", "Feet", "Miles", "Kilometers"])
-        self.ta_distance_units_combo.setCurrentText("Miles")  # Default to miles for distance from tower
+        self.ta_distance_units_combo.setCurrentText("Miles")  # Default to miles for distance from site
         viz_layout.addWidget(self.ta_distance_units_combo, row, 1)
         row += 1
         
@@ -429,11 +443,11 @@ class MainWindow(QMainWindow):
         
         # Default Location Point accuracy for missing data
         default_accuracy_label = QLabel("Default Location Accuracy:")
-        default_accuracy_label.setToolTip("Default accuracy radius used when input location point data has no accuracy value (uses Location Point Accuracy Units above)")
+        default_accuracy_label.setToolTip("Default accuracy radius used when input location point data has no accuracy value (uses Location Point Accuracy Units above). Default 0 shows a point without an accuracy circle; accuracy is unknown, not exact.")
         viz_layout.addWidget(default_accuracy_label, row, 0)
         self.default_accuracy_spinbox = QSpinBox()
-        self.default_accuracy_spinbox.setRange(1, 10000)
-        self.default_accuracy_spinbox.setValue(100)  # Default 100
+        self.default_accuracy_spinbox.setRange(0, 10000)
+        self.default_accuracy_spinbox.setValue(0)
         viz_layout.addWidget(self.default_accuracy_spinbox, row, 1)
         row += 1
         
@@ -543,40 +557,53 @@ class MainWindow(QMainWindow):
         # Colors Tab
         color_tab = QWidget()
         color_layout = QGridLayout(color_tab)
+        colors_help_hint = QLabel("Hover over labels for more information.")
+        colors_help_hint.setStyleSheet(settings_help_hint.styleSheet())
+        color_layout.addWidget(colors_help_hint, 0, 0, 1, 2)
         
         # Sector leg lines color
-        color_layout.addWidget(QLabel("Tower/Sector Legs:"), 0, 0)
+        leg_color_label = QLabel("Cell Site/Sector Legs:")
+        leg_color_label.setToolTip("Color of the lines extending from the cell site along the sector edges.")
+        color_layout.addWidget(leg_color_label, 1, 0)
         self.leg_color_button = QPushButton()
         self.leg_color = "ff000000"  # Black
         self.leg_color_button.setStyleSheet(f"background-color: {self.kml_to_qt_color(self.leg_color)}")
         self.leg_color_button.clicked.connect(lambda: self.select_color("leg"))
-        color_layout.addWidget(self.leg_color_button, 0, 1)
+        color_layout.addWidget(self.leg_color_button, 1, 1)
         
         # Sector shaded area color
-        color_layout.addWidget(QLabel("Tower/Sector Shaded Area:"), 1, 0)
+        shaded_color_label = QLabel("Cell Site/Sector Shaded Area:")
+        shaded_color_label.setToolTip("Color of the sector's shaded area, or the 360-degree area when azimuth is missing.")
+        color_layout.addWidget(shaded_color_label, 2, 0)
         self.shaded_color_button = QPushButton()
         self.shaded_color = "ff00ffff"  # Yellow
         self.shaded_color_button.setStyleSheet(f"background-color: {self.kml_to_qt_color(self.shaded_color)}")
         self.shaded_color_button.clicked.connect(lambda: self.select_color("shaded"))
-        color_layout.addWidget(self.shaded_color_button, 1, 1)
+        color_layout.addWidget(self.shaded_color_button, 2, 1)
         
         # Distance Band color
-        color_layout.addWidget(QLabel("Distance Band Color:"), 2, 0)
+        band_color_label = QLabel("Distance Band Color:")
+        band_color_label.setToolTip("Color of the distance band drawn from the reported distance and configured inner/outer extensions.")
+        color_layout.addWidget(band_color_label, 3, 0)
         self.band_color_button = QPushButton()
         self.band_color = "ff0099ff"  # Orange
         self.band_color_button.setStyleSheet(f"background-color: {self.kml_to_qt_color(self.band_color)}")
         self.band_color_button.clicked.connect(lambda: self.select_color("band"))
-        color_layout.addWidget(self.band_color_button, 2, 1)
+        color_layout.addWidget(self.band_color_button, 3, 1)
         
         # Location Point color
-        color_layout.addWidget(QLabel("Location Point Color:"), 3, 0)
+        gps_color_label = QLabel("Location Point Color:")
+        gps_color_label.setToolTip("Color of Location Point accuracy circles and visible points when accuracy is invalid.")
+        color_layout.addWidget(gps_color_label, 4, 0)
         self.gps_color_button = QPushButton()
         self.gps_color = "ff00ff00"  # Green
         self.gps_color_button.setStyleSheet(f"background-color: {self.kml_to_qt_color(self.gps_color)}")
         self.gps_color_button.clicked.connect(lambda: self.select_color("gps"))
-        color_layout.addWidget(self.gps_color_button, 3, 1)
+        color_layout.addWidget(self.gps_color_button, 4, 1)
 
-        color_layout.addWidget(QLabel("Reference Cell Site Dots:"), 4, 0)
+        reference_color_label = QLabel("Reference Cell Site Dots:")
+        reference_color_label.setToolTip("Color of static reference cell site dots. These are separate from event geometry and do not estimate coverage.")
+        color_layout.addWidget(reference_color_label, 5, 0)
         self.reference_site_color_button = QPushButton()
         self.reference_site_color = "ff000000"  # Black
         self.reference_site_color_button.setStyleSheet(
@@ -585,9 +612,9 @@ class MainWindow(QMainWindow):
         self.reference_site_color_button.clicked.connect(
             lambda: self.select_color("reference_site")
         )
-        color_layout.addWidget(self.reference_site_color_button, 4, 1)
+        color_layout.addWidget(self.reference_site_color_button, 5, 1)
         
-        color_layout.setRowStretch(5, 1)
+        color_layout.setRowStretch(6, 1)
         
         tab_widget.addTab(color_tab, "Colors")
 
@@ -979,7 +1006,7 @@ class MainWindow(QMainWindow):
         self.file_label.setStyleSheet("color: #00ff00; font-weight: bold;")
         self.drag_drop_widget.drop_label.setText(f"📁 Imported: {filename}\n\nReady to generate output files")
         self.add_status_message(
-            f"✅ Imported {len(self.imported_dataframe)} rows as {dialog.selected_data_type} data"
+            f"✅ Imported {len(self.imported_dataframe)} rows as {data_type_label(dialog.selected_data_type)} data"
         )
         cell_site_metadata = dialog.selected_cell_site_metadata
         if cell_site_metadata.get('enabled'):
@@ -1009,7 +1036,7 @@ class MainWindow(QMainWindow):
                 self.add_status_message(
                     f"⚠️ Cell site list: {duplicate_keys} repeated "
                     f"site/sector {'key had' if duplicate_keys == 1 else 'keys had'} "
-                    "identical mapped tower values; "
+                    "identical mapped cell site values; "
                     f"{duplicate_rows} redundant "
                     f"{'row was' if duplicate_rows == 1 else 'rows were'} collapsed"
                 )
@@ -1166,7 +1193,7 @@ class MainWindow(QMainWindow):
             has_timestamp = 'timestamp' in columns
             
             # Check for exact template matches
-            # Distance from Tower Template: Timestamp, Latitude, Longitude, Azimuth, Distance
+            # Distance from Site Template: Timestamp, Latitude, Longitude, Azimuth, Distance
             if (any(col in ['latitude', 'lat'] for col in columns) and
                 any(col in ['longitude', 'lon', 'long'] for col in columns) and
                 has_timestamp and
@@ -1174,9 +1201,9 @@ class MainWindow(QMainWindow):
                 any(col in ['distance', 'range', 'distance (m)', 'distance (meters)'] for col in columns)):
                 detected_type = "distance_from_tower"
                 self.ta_radio.setChecked(True)
-                self.add_status_message("✅ Valid Distance from Tower template detected")
+                self.add_status_message("✅ Valid Distance from Cell Site template detected")
                 
-            # Tower/Sector Template: Latitude, Longitude, Timestamp, Azimuth
+            # Site/Sector Template: Latitude, Longitude, Timestamp, Azimuth
             elif (any(col in ['latitude', 'lat'] for col in columns) and
                   any(col in ['longitude', 'lon', 'long'] for col in columns) and
                   has_timestamp and
@@ -1184,7 +1211,7 @@ class MainWindow(QMainWindow):
                   not any(col in ['distance', 'range', 'distance (m)', 'distance (meters)'] for col in columns)):
                 detected_type = "cell_tower"
                 self.tower_radio.setChecked(True)
-                self.add_status_message("✅ Valid Tower/Sector template detected")
+                self.add_status_message("✅ Valid Cell Site/Sector template detected")
                 
             # Location Point Template: Latitude, Longitude, Timestamp, (optional) Accuracy
             elif (any(col in ['latitude', 'lat'] for col in columns) and
@@ -1693,7 +1720,7 @@ class MainWindow(QMainWindow):
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
         
-        self.add_status_message(f"Starting KML and GeoJSON generation for {data_type} data...")
+        self.add_status_message(f"Starting KML and GeoJSON generation for {data_type_label(data_type)} data...")
         self.generation_messages = []
         for warning in marker_warnings:
             self.handle_generation_status(f"⚠️ {warning}; marker skipped")
@@ -1986,7 +2013,7 @@ class MainWindow(QMainWindow):
             f"Output GeoJSON: {geojson_path.name if geojson_path.exists() else 'Not generated'}",
             f"Output GeoJSON SHA-256: {geojson_hash}",
             f"Input workflow: {'Import Wizard' if self.current_import_metadata else 'Template/direct file'}",
-            f"Record type: {self.current_generation_type}",
+            f"Record type: {data_type_label(self.current_generation_type)}",
             "",
             "Timestamp interpretation",
             f"Source timezone: {source_timezone_description}",
@@ -2024,7 +2051,7 @@ class MainWindow(QMainWindow):
                     f"Cell site list SHA-256: {cell_site_hash}",
                     f"Worksheet: {cell_site_metadata.get('worksheet') or 'Not applicable'}",
                     f"Header row: {cell_site_metadata.get('header_row')}",
-                    f"Tower field source: {cell_site_metadata.get('policy_label') or cell_site_metadata.get('policy')}",
+                    f"Cell site field source: {cell_site_metadata.get('policy_label') or cell_site_metadata.get('policy')}",
                     "Original-record lookup mapping:",
                 ])
                 for role, source_column in cell_site_metadata.get(
@@ -2112,9 +2139,9 @@ class MainWindow(QMainWindow):
             f"Shaded area color (KML AABBGGRR): {settings.get('shaded_color')}",
             f"Distance band color (KML AABBGGRR): {settings.get('band_color')}",
             f"Location point color (KML AABBGGRR): {settings.get('gps_color')}",
-            f"Reference site layer: {'Enabled' if settings.get('include_reference_sites') else 'Disabled'}",
+            f"Reference cell site layer: {'Enabled' if settings.get('include_reference_sites') else 'Disabled'}",
             f"Nearby cell site radius (miles): {settings.get('reference_site_radius_miles', 25.0)}",
-            f"Reference site color (KML AABBGGRR): {settings.get('reference_site_color', 'ff000000')}",
+            f"Reference cell site color (KML AABBGGRR): {settings.get('reference_site_color', 'ff000000')}",
             f"Custom label: {settings.get('custom_label') or 'None'}",
             "",
             "Row outcomes",
@@ -2124,9 +2151,9 @@ class MainWindow(QMainWindow):
             f"Skipped - invalid coordinates: {summary.get('skipped_invalid_coordinates', 'Unknown')}",
             f"Skipped - missing timestamp: {summary.get('skipped_missing_timestamp', 'Unknown')}",
             f"Skipped - DST conflict: {summary.get('skipped_dst_conflict', 'Unknown')}",
-            f"Reference site source: {summary.get('reference_site_source', 'Not applicable')}",
-            f"Reference sites considered: {summary.get('reference_sites_considered', 0)}",
-            f"Static reference sites generated: {summary.get('reference_sites_generated', 0)}",
+            f"Reference cell site source: {summary.get('reference_site_source', 'Not applicable')}",
+            f"Reference cell sites considered: {summary.get('reference_sites_considered', 0)}",
+            f"Static reference cell sites generated: {summary.get('reference_sites_generated', 0)}",
             "",
             "Generation warnings",
         ])
@@ -2166,12 +2193,12 @@ class MainWindow(QMainWindow):
         """Show context menu with template options"""
         menu = QMenu(self)
         
-        # Tower/Sector template
-        tower_action = menu.addAction("📶 Tower/Sector Template")
+        # Site/Sector template
+        tower_action = menu.addAction("📶 Cell Site/Sector Template")
         tower_action.triggered.connect(lambda: self.download_template("cell_tower"))
         
-        # Distance from Tower template
-        ta_action = menu.addAction("📏 Distance from Tower Template")
+        # Distance from Site template
+        ta_action = menu.addAction("📏 Distance from Cell Site Template")
         ta_action.triggered.connect(lambda: self.download_template("distance_from_tower"))
         
         # Point Location template
@@ -2191,7 +2218,7 @@ class MainWindow(QMainWindow):
         # Define template/sample data
         templates = {
             "cell_tower": {
-                "filename": "tower_sector_template.xlsx",
+                "filename": "cell_site_sector_template.xlsx",
                 "headers": ["Timestamp", "Latitude", "Longitude", "Azimuth"],
                 "sample_data": [
                     [datetime(2024, 1, 15, 14, 0, 0), 43.15831, -77.60938, 240],
@@ -2205,11 +2232,11 @@ class MainWindow(QMainWindow):
                     [datetime(2024, 1, 15, 16, 0, 0), 43.15470, -77.63213, 90],
                     [datetime(2024, 1, 15, 16, 15, 0), 43.16109, -77.65102, 180]
                 ],
-                "description": "Tower/Sector Data Template"
+                "description": "Cell Site/Sector Data Template"
             },
 
             "distance_from_tower": {
-                "filename": "distance_from_tower_template.xlsx",
+                "filename": "distance_from_cell_site_template.xlsx",
                 "headers": ["Timestamp", "Latitude", "Longitude", "Azimuth", "Distance"],
                 "sample_data": [
                     [datetime(2024, 1, 15, 14, 0, 0), 43.15831, -77.60938, 240, 0.8],
@@ -2223,7 +2250,7 @@ class MainWindow(QMainWindow):
                     [datetime(2024, 1, 15, 14, 24, 0), 43.15470, -77.63213, 90, 0.5],
                     [datetime(2024, 1, 15, 14, 27, 0), 43.16109, -77.65102, 180, 1.8]
                 ],
-                "description": "Distance from Tower Data Template"
+                "description": "Distance from Cell Site Data Template"
             },
 
             "gps": {

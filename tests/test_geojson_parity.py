@@ -104,6 +104,161 @@ def geojson_primitive_counts_by_event(geojson_text):
 
 
 class GeoJSONParityTests(unittest.TestCase):
+    def test_unknown_accuracy_exports_visible_points_without_circles(self):
+        for default_accuracy in (None, 0, 100):
+            for supplied_accuracy in (None, 0, '0', 'invalid', 25):
+                for flattened in (False, True):
+                    with self.subTest(
+                        default=default_accuracy, supplied=supplied_accuracy,
+                        flattened=flattened,
+                    ):
+                        settings = generator_settings()
+                        if default_accuracy is None:
+                            settings.pop('default_accuracy')
+                        else:
+                            settings['default_accuracy'] = default_accuracy
+                        settings['flatten_event_folders'] = flattened
+                        records = pd.DataFrame([{
+                            'Timestamp': '2024-01-15T14:00:00Z',
+                            'Latitude': '43.123456789',
+                            'Longitude': '-77.123456789',
+                            'Accuracy': supplied_accuracy,
+                        }])
+                        generator = KMLGenerator('', 'Location Point', settings)
+                        messages = []
+                        generator.status_message.connect(messages.append)
+                        kml = generator.generate_gps_kml(records)
+                        payload = json.loads(generator.generate_gps_geojson(records))
+                        has_circle = (
+                            supplied_accuracy == 25
+                            or (supplied_accuracy is None and default_accuracy == 100)
+                        )
+                        self.assertEqual(
+                            kml_primitive_counts_by_event(kml),
+                            geojson_primitive_counts_by_event(json.dumps(payload)),
+                        )
+                        root = ET.fromstring(kml)
+                        self.assertEqual(
+                            int(has_circle),
+                            len(root.findall('.//kml:Polygon', KML_NAMESPACE)),
+                        )
+                        if has_circle:
+                            continue
+                        self.assertEqual(1, len(payload['features']))
+                        feature = payload['features'][0]
+                        self.assertEqual('Point', feature['geometry']['type'])
+                        self.assertEqual(
+                            [-77.123456789, 43.123456789, 0],
+                            feature['geometry']['coordinates'],
+                        )
+                        props = feature['properties']
+                        self.assertEqual('location', props['osloc_event_type'])
+                        self.assertEqual('location_point', props['osloc_component_type'])
+                        self.assertEqual(
+                            settings['gps_color'], props['osloc_style_gps_line_color']
+                        )
+                        point = next(
+                            placemark for placemark in
+                            root.findall('.//kml:Placemark', KML_NAMESPACE)
+                            if placemark.find('kml:Point', KML_NAMESPACE) is not None
+                        )
+                        style_id = point.findtext(
+                            'kml:styleUrl', namespaces=KML_NAMESPACE
+                        )[1:]
+                        style = root.find(
+                            f".//kml:Style[@id='{style_id}']", KML_NAMESPACE
+                        )
+                        self.assertEqual(
+                            '1', style.findtext(
+                                'kml:IconStyle/kml:scale', namespaces=KML_NAMESPACE
+                            ),
+                        )
+                        self.assertTrue(messages)
+                        if supplied_accuracy != 'invalid':
+                            self.assertIn('Unknown', props['description'])
+                            self.assertTrue(any(
+                                'accuracy unknown' in message for message in messages
+                            ))
+
+    def test_site_terminology_in_visible_exports_preserves_schema_identifiers(self):
+        records = pd.DataFrame([
+            {
+                'Timestamp': '2024-01-15T14:00:00Z',
+                'Latitude': '43.123456789', 'Longitude': '-77.123456789',
+                'Azimuth': azimuth, 'Distance': distance,
+            }
+            for azimuth, distance in ((90, 2), (90, None), (None, 2), (None, None))
+        ])
+        cases = (
+            (
+                'Tower/Sector', 'generate_cell_tower_kml',
+                'generate_cell_tower_geojson', 'Cell Site/Sector Data',
+                {'tower_sector', 'tower_no_azimuth'},
+            ),
+            (
+                'Distance from Tower', 'generate_distance_from_tower_kml',
+                'generate_distance_from_tower_geojson',
+                'Distance from Cell Site Analysis',
+                {'tower_sector_distance', 'tower_sector', 'distance_only',
+                 'tower_no_azimuth'},
+            ),
+        )
+        for data_type, kml_method, json_method, name, event_types in cases:
+            for consolidated in (False, True):
+                for flattened in (False, True):
+                    with self.subTest(
+                        data_type=data_type, consolidated=consolidated,
+                        flattened=flattened,
+                    ):
+                        settings = generator_settings()
+                        settings['consolidate_event_placemarks'] = consolidated
+                        settings['flatten_event_folders'] = flattened
+                        generator = KMLGenerator('', data_type, settings)
+                        warnings = []
+                        generator.status_message.connect(warnings.append)
+                        root = ET.fromstring(getattr(generator, kml_method)(records))
+                        payload = json.loads(getattr(generator, json_method)(records))
+                        self.assertEqual(name, payload['osloc_dataset_name'])
+                        self.assertEqual(
+                            name,
+                            root.findtext('kml:Document/kml:name',
+                                          namespaces=KML_NAMESPACE),
+                        )
+                        for node in root.findall('.//kml:name', KML_NAMESPACE):
+                            self.assertNotIn('tower', (node.text or '').lower())
+                        for node in root.findall('.//kml:description', KML_NAMESPACE):
+                            self.assertNotIn('tower', (node.text or '').lower())
+                        properties = [
+                            feature['properties'] for feature in payload['features']
+                        ]
+                        self.assertEqual(
+                            event_types,
+                            {item['osloc_event_type'] for item in properties},
+                        )
+                        for item in properties:
+                            for key in ('name', 'description', 'osloc_event_label',
+                                        'osloc_dataset_name'):
+                                self.assertNotIn(
+                                    'tower', str(item.get(key, '')).lower()
+                                )
+                        descriptions = [
+                            node.text or ''
+                            for node in root.findall('.//kml:description', KML_NAMESPACE)
+                        ]
+                        self.assertTrue(any('<b>Cell Site:</b>' in text for text in descriptions))
+                        self.assertTrue(any(
+                            '<b>Cell Site:</b>' in item.get('description', '')
+                            for item in properties
+                        ))
+                        self.assertTrue(warnings)
+                        self.assertNotIn('tower', '\n'.join(warnings).lower())
+                        self.assertEqual(
+                            'Event - Cell Site SYNTHETIC-1',
+                            generator.create_event_label(
+                                'Event', pd.Series({'Tower ID': 'SYNTHETIC-1'})
+                            ),
+                        )
+
     def test_outputs_include_preliminary_review_notice(self):
         records = pd.DataFrame([{
             'Timestamp': '2024-01-15T14:00:00Z',
@@ -229,7 +384,12 @@ class GeoJSONParityTests(unittest.TestCase):
                     getattr(generator, geojson_method_name)(empty_records)
                 )
 
-                self.assertIn(f'{data_type if data_type != "Distance from Tower" else "Distance from Tower Analysis"}', kml_text)
+                expected_name = {
+                    'Tower/Sector': 'Cell Site/Sector Data',
+                    'Distance from Tower': 'Distance from Cell Site Analysis',
+                    'Location Point': 'Location Point',
+                }[data_type]
+                self.assertIn(expected_name, kml_text)
                 self.assertEqual(
                     1,
                     sum(
@@ -374,7 +534,7 @@ class GeoJSONParityTests(unittest.TestCase):
         self.assertEqual(2, len(folders))
         reference_folder = folders[1]
         self.assertEqual(
-            'Tower/Sector Data - Reference Sites',
+            'Cell Site/Sector Data - Reference Cell Sites',
             reference_folder.findtext('kml:name', namespaces=KML_NAMESPACE),
         )
         reference_placemarks = reference_folder.findall(

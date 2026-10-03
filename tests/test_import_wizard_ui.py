@@ -240,17 +240,27 @@ class ImportWizardDialogUITests(unittest.TestCase):
 
     def test_coordinate_labels_distinguish_tower_and_location_records(self):
         dialog = ImportWizardDialog()
+        self.assertEqual(
+            ["Location Point", "Cell Site/Sector", "Distance from Cell Site"],
+            [
+                dialog.record_type_combo.itemText(index)
+                for index in range(dialog.record_type_combo.count())
+            ],
+        )
+        self.assertEqual(
+            "Distance from cell site", dialog.application_field_label("Distance")
+        )
 
         for data_type in ("Tower/Sector", "Distance from Tower"):
             dialog.record_type_combo.setCurrentIndex(
                 dialog.record_type_combo.findData(data_type)
             )
             self.assertEqual(
-                "Cell tower/site latitude",
+                "Cell site latitude",
                 dialog.mapping_labels["Latitude"].text(),
             )
             self.assertEqual(
-                "Cell tower/site longitude",
+                "Cell site longitude",
                 dialog.mapping_labels["Longitude"].text(),
             )
 
@@ -259,6 +269,32 @@ class ImportWizardDialogUITests(unittest.TestCase):
         )
         self.assertEqual("Latitude", dialog.mapping_labels["Latitude"].text())
         self.assertEqual("Longitude", dialog.mapping_labels["Longitude"].text())
+
+    def test_site_and_legacy_coordinate_headers_are_suggested(self):
+        cases = (
+            ("Cell Site Latitude", "Cell Site Longitude", "Distance from Cell Site"),
+            ("Site_Lat", "Site_Lon", "Distance from Site"),
+            ("Cell Site Latitude", "Cell Site Longitude", "Distance from Site"),
+            ("Tower_Lat", "Tower_Lon", "Distance from Tower"),
+        )
+        for latitude, longitude, distance in cases:
+            with self.subTest(latitude=latitude):
+                dialog = ImportWizardDialog()
+                self.addCleanup(dialog.close)
+                dialog.source_dataframe = pd.DataFrame([{
+                    "Timestamp": "2024-01-15T14:00:00Z",
+                    latitude: 43.1, longitude: -77.1, distance: 2,
+                }])
+                dialog.populate_mapping_options()
+                self.assertEqual(
+                    latitude, dialog.mapping_combos["Latitude"].currentData()
+                )
+                self.assertEqual(
+                    longitude, dialog.mapping_combos["Longitude"].currentData()
+                )
+                self.assertEqual(
+                    distance, dialog.mapping_combos["Distance"].currentData()
+                )
 
     def test_excel_header_row_8_preview_uses_1_based_physical_rows(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -720,12 +756,12 @@ class ImportWizardDialogUITests(unittest.TestCase):
             )
 
         message = str(raised.exception)
-        self.assertIn("conflicting tower data", message)
+        self.assertIn("conflicting cell site data", message)
         self.assertIn("Site / Node ID 1001", message)
         self.assertIn("Sector / Cell ID 1", message)
         self.assertIn("cell site rows 2, 3", message)
-        self.assertIn("Cell tower/site latitude: 43.1 vs 44.1", message)
-        self.assertIn("Cell tower/site longitude: -77.1 vs -78.1", message)
+        self.assertIn("Cell site latitude: 43.1 vs 44.1", message)
+        self.assertIn("Cell site longitude: -77.1 vs -78.1", message)
         self.assertIn("Identical mapped duplicates are accepted automatically", message)
 
     def test_cell_site_excel_uses_its_own_sheet_and_header_row(self):

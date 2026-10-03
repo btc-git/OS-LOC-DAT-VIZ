@@ -1412,9 +1412,9 @@ function inferLabel(event) {
 
 export function humanizeEventType(value) {
   const known = {
-    tower_sector: "Tower sector",
-    tower_sector_distance: "Tower sector + distance",
-    tower_no_azimuth: "Tower / no azimuth",
+    tower_sector: "Cell Site/Sector",
+    tower_sector_distance: "Cell Site/Sector + distance",
+    tower_no_azimuth: "Cell Site / no azimuth",
     distance_only: "Distance only",
     location_accuracy: "Location + accuracy",
     location: "Location",

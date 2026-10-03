@@ -21,7 +21,9 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtCore import QTimer
 from PyQt6.QtTest import QSignalSpy
-from PyQt6.QtWidgets import QApplication, QHBoxLayout
+from PyQt6.QtWidgets import (
+    QApplication, QAbstractButton, QHBoxLayout, QLabel, QScrollArea, QToolButton,
+)
 
 import geolibre_launcher
 from geolibre_launcher import (
@@ -37,6 +39,7 @@ from geolibre_launcher import (
     provision_geolibre_integration,
 )
 from license_dialog import LicenseDialog
+from dialogs import DisclaimerDialog
 from main_window import MainWindow
 from import_wizard import ImportWizardDialog, SourceFileLoadWorker
 
@@ -355,6 +358,8 @@ class GenerationActionTests(unittest.TestCase):
         self.assertEqual("Process", window.generate_button.text())
         self.assertEqual("Process and Open in Viewer", window.viewer_button.text())
         self.assertEqual("Open Viewer", window.open_viewer_button.text())
+        self.assertEqual("Cell Site/Sector Data", window.tower_radio.text())
+        self.assertEqual("Distance from Cell Site Data", window.ta_radio.text())
         self.assertEqual(
             ["YMD", "YDM", "MDY", "DMY"],
             [
@@ -380,6 +385,142 @@ class GenerationActionTests(unittest.TestCase):
             generate_mock.call_args_list,
         )
         open_mock.assert_called_once_with()
+
+    def test_site_template_download_names_preserve_internal_keys(self):
+        window = MainWindow()
+        self.addCleanup(window.close)
+        cases = (
+            ("cell_tower", "Cell Site/Sector Data Template", "cell_site_sector_template.xlsx"),
+            (
+                "distance_from_tower", "Distance from Cell Site Data Template",
+                "distance_from_cell_site_template.xlsx",
+            ),
+        )
+        for key, description, filename in cases:
+            with self.subTest(template=key), patch(
+                "main_window.QFileDialog.getSaveFileName",
+                return_value=("", ""),
+            ) as save_dialog:
+                window.download_template(key)
+                self.assertEqual(
+                    (window, f"Save {description}", filename,
+                     "Excel Files (*.xlsx);;All Files (*)"),
+                    save_dialog.call_args.args,
+                )
+
+    def test_application_and_disclaimer_visible_text_uses_sites(self):
+        window = MainWindow()
+        self.addCleanup(window.close)
+        dialog = DisclaimerDialog(window)
+        self.addCleanup(dialog.close)
+        for container in (window, dialog):
+            for widget_type in (QLabel, QAbstractButton):
+                for widget in container.findChildren(widget_type):
+                    self.assertNotIn("tower", widget.text().lower())
+                    self.assertNotIn("tower", widget.toolTip().lower())
+
+    def test_settings_retain_tooltips_without_extra_help_controls(self):
+        window = MainWindow()
+        self.addCleanup(window.close)
+        settings_tab = window.tab_widget.widget(1)
+        self.assertIsInstance(settings_tab, QScrollArea)
+        settings_widget = settings_tab.widget()
+        self.assertEqual([], settings_widget.findChildren(QToolButton))
+        labels = [
+            label for label in settings_widget.findChildren(QLabel)
+            if label.toolTip()
+        ]
+        self.assertEqual(14, len(labels))
+        grid = settings_widget.layout()
+        self.assertEqual(
+            "Hover over labels for more information.",
+            grid.itemAtPosition(0, 0).widget().text(),
+        )
+        for label in labels:
+            item = next(
+                grid.itemAt(index)
+                for index in range(grid.count())
+                if grid.itemAt(index).widget() is label
+            )
+            self.assertIs(label, item.widget())
+            self.assertFalse(label.wordWrap())
+        radius_help = next(
+            label for label in labels
+            if "Nearby Cell Site Radius" in label.text()
+        )
+        self.assertIn("Only applies when using a separate cell site list", radius_help.toolTip())
+        self.assertIn("this radius has no effect", radius_help.toolTip())
+        self.assertIn("does not estimate coverage", radius_help.toolTip())
+        self.assertEqual(25.0, window.reference_site_radius_spinbox.value())
+        self.assertEqual(0, window.default_accuracy_spinbox.minimum())
+        self.assertEqual(0, window.default_accuracy_spinbox.value())
+        accuracy_help = next(
+            label for label in labels if label.text() == "Default Location Accuracy:"
+        )
+        self.assertIn("accuracy is unknown, not exact", accuracy_help.toolTip())
+
+    def test_color_tooltips_preserve_original_controls(self):
+        window = MainWindow()
+        self.addCleanup(window.close)
+        colors_tab = window.tab_widget.widget(2)
+        self.assertEqual([], colors_tab.findChildren(QToolButton))
+        grid = colors_tab.layout()
+        self.assertEqual(
+            "Hover over labels for more information.",
+            grid.itemAtPosition(0, 0).widget().text(),
+        )
+        color_buttons = (
+            window.leg_color_button, window.shaded_color_button,
+            window.band_color_button, window.gps_color_button,
+            window.reference_site_color_button,
+        )
+        for row, color_button in enumerate(color_buttons, 1):
+            self.assertIs(color_button, grid.itemAtPosition(row, 1).widget())
+            label = grid.itemAtPosition(row, 0).widget()
+            self.assertIsInstance(label, QLabel)
+            self.assertFalse(label.wordWrap())
+            self.assertTrue(label.toolTip())
+        with patch.object(window, "select_color") as select_color:
+            for button in color_buttons:
+                button.click()
+        self.assertEqual(
+            [call("leg"), call("shaded"), call("band"), call("gps"),
+             call("reference_site")],
+            select_color.call_args_list,
+        )
+
+    def test_disclaimer_describes_current_workflows_and_troubleshooting(self):
+        dialog = DisclaimerDialog()
+        self.addCleanup(dialog.close)
+        text = "\n".join(label.text() for label in dialog.findChildren(QLabel))
+        for phrase in (
+            "paired preliminary KML and GeoJSON",
+            "Process and Open in Viewer",
+            "Open Viewer",
+            "Load GeoJSON",
+            ".geolibre",
+            "Check Matching Rows",
+            "Use exact times",
+            "separate cell site list",
+            "Reference Cell Sites",
+            "initially 0",
+            "Zero means unknown accuracy",
+            "Invalid accuracy produces a point",
+            "Fractional seconds in text timestamps are discarded",
+            "Location Point records with missing timestamps are omitted",
+            "GeoJSON in the included GeoLibre viewer",
+            "performance still depends",
+            "Show All",
+            "From/Through",
+            "Focus Set",
+            "one running instance per Windows session",
+            "map services",
+            "OpenFreeMap",
+            "IP address and viewed map area",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, text)
+        self.assertNotIn("milliseconds auto-handled", text)
 
     def test_main_timezone_defaults_match_import_wizard(self):
         with patch.object(MainWindow, "show_disclaimer_dialog"):
@@ -481,8 +622,8 @@ class GenerationActionTests(unittest.TestCase):
         self.assertEqual("YMD", window.source_date_order_combo.currentData())
 
     def test_markers_tab_collects_manual_rows_and_colors(self):
-        with patch.object(MainWindow, "show_disclaimer_dialog"):
-            window = MainWindow()
+        self.enterContext(patch.object(MainWindow, "show_disclaimer_dialog"))
+        window = MainWindow()
         self.addCleanup(window.close)
 
         self.assertEqual(
@@ -927,8 +1068,10 @@ class GenerationActionTests(unittest.TestCase):
             )
 
             self.assertIn("Cell site list file: cell_sites.csv", log_text)
+            self.assertIn("Record type: Distance from Cell Site", log_text)
+            self.assertNotIn("tower", log_text.lower())
             self.assertIn(
-                "Tower field source: Cell site list only; unmatched values remain blank",
+                "Cell site field source: Cell site list only; unmatched values remain blank",
                 log_text,
             )
             self.assertIn(
@@ -951,11 +1094,11 @@ class GenerationActionTests(unittest.TestCase):
                 log_text,
             )
             self.assertIn("Latitude values from cell site list: 1", log_text)
-            self.assertIn("Reference site layer: Enabled", log_text)
+            self.assertIn("Reference cell site layer: Enabled", log_text)
             self.assertIn("Nearby cell site radius (miles): 25.0", log_text)
-            self.assertIn("Reference site source: cell site list", log_text)
-            self.assertIn("Reference sites considered: 12", log_text)
-            self.assertIn("Static reference sites generated: 5", log_text)
+            self.assertIn("Reference cell site source: cell site list", log_text)
+            self.assertIn("Reference cell sites considered: 12", log_text)
+            self.assertIn("Static reference cell sites generated: 5", log_text)
             self.assertIn("Marker rows accepted: 3", log_text)
             self.assertIn("Static markers generated: 3", log_text)
             self.assertIn("Marker list 1: markers.csv", log_text)

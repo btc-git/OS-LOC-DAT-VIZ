@@ -1489,11 +1489,11 @@ function runPresentationFormattingCheck(diag) {
 
     const description = diag.parseDescription(
         '<table><tr><td><b>Source Row:</b></td><td>2</td></tr>' +
-        '<tr><td><b>Tower:</b></td><td>43.16619974, -77.5910047</td></tr>' +
+        '<tr><td><b>Cell Site:</b></td><td>43.16619974, -77.5910047</td></tr>' +
         '<tr><td><b>Azimuth:</b></td><td>30.0°</td></tr></table>'
     );
     assert(
-        description === "Source Row: 2\nTower: 43.16619974, -77.5910047\nAzimuth: 30.0°",
+        description === "Source Row: 2\nCell Site: 43.16619974, -77.5910047\nAzimuth: 30.0°",
         "KML table details should retain one readable field per line"
     );
     return { title: expectedTitle, details: description };

@@ -4,7 +4,18 @@
 
 ## [Unreleased]
 
+## [2.0.0-beta.1] - 2026-10-03
+
+### Changed
+- Default Location Accuracy is now 0: missing or zero accuracy produces a visible point without an accuracy circle in KML and GeoJSON, explicitly identified as unknown rather than exact; positive accuracy values and configurable positive defaults retain their circles
+- The application is now labeled 2.0.0-beta.1 for the first 2.0 beta; Windows executable metadata uses numeric version 2.0.0.1, while bundled viewer and plugin versions remain independent
+- Settings and Colors retain tooltip-only labels with a small hover-help reminder at the top of each tab; Nearby Cell Site Radius help explicitly explains its CSL-only effect and separation from event geometry
+- Timestamp and missing-data documentation now describes named source timezones, year-first date-order choices, fractional-second handling, and configured accuracy defaults; viewer guidance explicitly identifies network-backed basemap behavior
+- Startup information and usage guidance now describe the bundled GeoLibre workflow, import filtering and cell-site joins, static auxiliary datasets, missing-data outcomes, and current viewer troubleshooting
+- User-facing terminology now uses Cell Site, Cell Site/Sector, and Distance from Cell Site throughout the application, notices, templates, KML/GeoJSON descriptions, viewer, and generation logs; existing internal identifiers and legacy input headers remain compatible
+
 ### Fixed
+- The main program window now appears behind the startup disclaimer, which remains modal until dismissed
 - TXT generation logs now record the source timestamp interpretation and selected output display timezone separately
 - Numeric Excel serial timestamps now use Excel's 1900 date system without a one-day shift
 - Import date/time filters now use the selected display timezone, or the source timezone when display is set to No Change
@@ -14,8 +25,8 @@
 ### Added
 - Current-record-set markers with unlimited manual entry, CSV/XLS/XLSX import, row-specific validation warnings, individual colors, and a downloadable coordinate-only template
 - Separate static marker datasets in KML and GeoJSON with dataset-wide and individual controls, always-visible enabled labels, and coordinate details in GeoLibre
-- Static, independently toggleable reference-site layers for tower-based KML and GeoJSON outputs, including unique record towers or radius-filtered CSL neighbors, configurable dot color, and a 25-mile default radius
-- Optional separate cell site list import for Tower/Sector and Distance from Tower records, with mapped two-column lookup keys, authoritative tower fields, previews, match accounting, and TXT-log provenance
+- Static, independently toggleable reference-cell-site layers for cell-site-based KML and GeoJSON outputs, including unique record cell sites or radius-filtered CSL neighbors, configurable dot color, and a 25-mile default radius
+- Optional separate cell site list import for Cell Site/Sector and Distance from Cell Site records, with mapped two-column lookup keys, authoritative cell site fields, previews, match accounting, and TXT-log provenance
 - Paired GeoJSON output with the same event identity, temporal metadata, geometry, and display colors as KML
 - Stable `osloc_*` dataset, event, component, timezone, and epoch metadata for interoperable viewers
 - GeoLibre viewer plugin with event filtering, timeline playback, map labels, details, and focused navigation
@@ -33,7 +44,7 @@
 
 ### Changed
 - Reference-site event cards, KML balloons, and GeoLibre details now identify contributing CSL spreadsheet rows (or original-record rows without a CSL), omit unavailable Site IDs, and replace generic static timing text with row provenance
-- Tower-based import labels now distinguish cell tower/site coordinates from Location Point coordinates; mapped-equivalent CSL duplicates are collapsed, while referenced conflicts report their keys, rows, and differing fields
+- Cell-site-based import labels now distinguish cell site coordinates from Location Point coordinates; mapped-equivalent CSL duplicates are collapsed, while referenced conflicts report their keys, rows, and differing fields
 - KML now uses shared document styles, a flattened dataset folder, compact anchor metadata, and safe MultiGeometry consolidation to reduce import overhead
 - Source/evidence coordinates preserve supplied precision while derived geometry remains deterministically formatted
 - KML and GeoJSON event titles now use the same corrected local `MM/DD/YYYY, h:mm:ss AM/PM` format
@@ -85,7 +96,7 @@
 ## [1.1] - 2026-02-28
 
 ### Added
-- Distance from Tower now visualizes as a band with configurable inner and outer thickness
+- Distance from Cell Site now visualizes as a band with configurable inner and outer thickness
 - KML descriptions include band area in square miles
 - Settings tab reorganized into labeled sections with visual separators
 
@@ -98,8 +109,8 @@
 ## [1.0] - 2025-11-02
 
 ### Initial Release
-- Tower/Sector data visualization with directional wedges
-- Distance from Tower data visualization with arcs
+- Cell Site/Sector data visualization with directional wedges
+- Distance from Cell Site data visualization with arcs
 - Location Point data visualization with accuracy circles
 - Drag-and-drop file input (CSV and XLSX)
 - Customizable colors for all data types

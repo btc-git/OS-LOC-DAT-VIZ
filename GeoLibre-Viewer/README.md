@@ -15,3 +15,8 @@ per-user runtime directory. It installs the OS-LOC viewer plugin in GeoLibre's
 standard per-user plugin directory. Simplified chrome is enabled by generated
 OS-LOC companion projects and by the clean project used for reviewing existing
 KML or GeoJSON files.
+
+Generated viewer projects use the OpenFreeMap Liberty basemap. Loading that
+basemap requires a network connection and discloses ordinary tile-request
+metadata, including IP address and viewed map area, to OpenFreeMap. Local
+source-record processing and export do not imply offline basemap viewing.
