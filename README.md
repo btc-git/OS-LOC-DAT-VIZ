@@ -22,9 +22,9 @@ They do not replace the stable download above.
 
 ### 🎯 **Data Type Support**
 
-- **Cell Site/Sector Data**: Creates directional wedges with azimuth (does not depict coverage)
+- **Cell Site/Sector Data**: Creates directional wedges using antenna direction (azimuth), or circles when direction is missing; neither depicts RF coverage
 - **Distance from Cell Site Data**: Generates distance-based band visualization with configurable inner/outer band thickness
-- **Location Point Data**: Displays points with accuracy radius circles
+- **Location Point Data**: Displays points with optional accuracy circles; zero or invalid accuracy produces points without circles, and missing accuracy uses the configured default
 
 ### 🎨 **Customizable Visualization**
 
@@ -53,7 +53,7 @@ They do not replace the stable download above.
 - Built-in sample XLSX templates for proper formatting
 - Manual marker entry plus CSV/XLS/XLSX marker-list drag and drop
 - Automatic column-mapping wizard for files that do not match a standard template
-- Optional separate cell site list joined by mapped site/node and sector/cell IDs as the authoritative cell-site-coordinate source
+- Optional matching to a separate cell site list using site/node and sector/cell IDs to obtain cell site coordinates and antenna direction
 - Optional inclusive date/time range filtering during import
 - Named timezone and fixed UTC-offset handling
 - Human-readable TXT generation log with hashes, settings, row outcomes, and warnings
@@ -67,17 +67,19 @@ They do not replace the stable download above.
 ## How to Use
 
 1. Drag and drop a CSV or Excel file into the program, or use the Browse for File button.
-2. A file using the application’s standard template headers is recognized automatically.
-3. For other files, the column-mapping wizard opens automatically. Select the worksheet and header row, choose the record type, review the suggested mappings, and optionally limit the import to an inclusive date/time range.
-4. Review the timezone, slash/dash date order, units, and visualization settings. Optionally add or import current-record-set markers on the **Markers** tab.
-5. Click **Process** to create the KML, GeoJSON, and TXT generation log, or **Process and Open in Viewer** to create them and immediately open the GeoJSON in the included viewer. Use **Open Viewer** to review existing KML or GeoJSON files without generating new outputs.
+2. CSV and XLSX files using the application's standard template column names are recognized automatically. Files in the older XLS format open the mapping wizard.
+3. For other files, the **Import Original Records** mapping wizard opens automatically. Select the worksheet and the row containing the column names, choose the record type, and check that each source column is matched to the correct field. You can optionally limit the import to a date/time range.
+4. Review the timezone, date order (month or day first), units, and visualization settings. Optionally add or import markers for the current source records on the **Markers** tab.
+5. Click **Process** to create the KML, GeoJSON, and TXT generation log, or **Process and Open in Viewer** to create them and immediately open the GeoJSON in the included viewer. Use **Open Viewer**, then **Load GeoJSON**, to review existing GeoJSON files without generating new outputs. GeoJSON is recommended for GeoLibre; KML can be opened in Google Earth Pro.
 6. Review warnings and row outcomes in the TXT log. All visualizations remain preliminary and require independent expert review.
 
-Each generation writes a `.kml`, `.geojson`, and `.txt` file with the same base name. The log records source and output SHA-256 hashes, import mappings, timestamp interpretation, visualization settings, row outcomes, and warnings without copying source-record contents.
+Each generation writes a `.kml`, `.geojson`, and `.txt` file with the same base name. The log records source and output SHA-256 hashes (digital fingerprints), column mappings, date/time interpretation, visualization settings, counts of included and skipped records, and warnings without copying source-record contents.
 
 **Process and Open in Viewer** also creates a same-named `.geolibre` companion beside the outputs. This small viewer project does not duplicate the source records: it references the GeoJSON and stores its path, display name, dataset identifier, map extent, and viewer/plugin settings so GeoLibre can reopen it with the OS-LOC interface and frame its events automatically. Keep the `.geolibre` file with its GeoJSON; moving or renaming the GeoJSON can break the reference. The project may be deleted without affecting the KML, GeoJSON, or TXT files if convenient reopening is not needed. **Open Viewer** starts a clean, plugin-enabled session. Use the prominent **Load GeoJSON** button beneath the viewer-panel title for previous OS-LOC exports; repeat it to add more record sets. KML files remain available through GeoLibre drag and drop. On first use, the application verifies and extracts its pinned GeoLibre portable bundle and installs the included OS-LOC viewer plugin in GeoLibre's per-user plugin directory. Because GeoLibre enforces one running instance per Windows session, close any other GeoLibre window before starting the included viewer.
 
-For original carrier records that do not match a template, the import wizard opens automatically. It supports CSV, XLS, and XLSX files; worksheet and header-row selection; record-type selection; explicit column mapping; and optional inclusive date/time range filtering. Date selections include the complete start and end days by default; select **Use exact times** for narrower boundaries. **Check Matching Rows** reports both timestamp matches and rows with valid mapped coordinates before import. The filter uses the selected display timezone when one is chosen; **No Change** keeps filtering in the source timezone. Boundaries and source records are converted to UTC for comparison. Timestamps that cannot be parsed or uniquely resolved are excluded, and all filter counts and boundaries are recorded in the TXT generation log. Its live preview shows the first 25 source rows with each original column header and the application field currently mapped to it. Azimuth may be left unmapped when it is unavailable; the application will use a 360-degree visualization. Imported records are normalized in memory and the original file is not modified.
+For original carrier records that do not match a template, the import wizard opens automatically. It supports CSV, XLS, and XLSX files. Select the worksheet, the row containing the column names, and the record type, then match the source columns to the application fields. Its live preview shows the first 25 source rows with each original column name and the application field currently matched to it. Azimuth may be left unmapped when it is unavailable; the application will use a 360-degree visualization. Imported records are prepared in memory and the original file is not modified.
+
+You can optionally limit the import to a date/time range. By default, the full selected days are included; select **Use exact times** for narrower limits. **Check Matching Rows** shows how many records match the range and have valid mapped coordinates. The filter uses the selected display timezone; **No Change** keeps filtering in the source timezone. The app converts the selected limits and record times to UTC for comparison. While filtering is enabled, records with missing, unreadable, or uncertain times are excluded because the app cannot confirm that they fall within the range. The TXT log records the filter limits and counts.
 
 Cell Site/Sector and Distance from Cell Site imports can optionally use a separate cell site list. Enable **Use a separate cell site list**, drop or browse to the CSL, select its worksheet and header row, then map a two-part lookup: the original record's site/node ID and sector/cell ID to the corresponding CSL columns. Map CSL cell site latitude, cell site longitude, and optionally sector azimuth. While enabled, the corresponding original-record mappings are disabled and ignored; timestamp, lookup IDs, and Distance from cell site still come from the original records. An unmatched lookup leaves the cell site fields blank. Repeated lookup keys with equivalent mapped cell site values are collapsed automatically. Conflicting duplicates stop the import only when the original records reference that key; the message identifies its site/node ID, sector/cell ID, CSL rows, and differing mapped fields. The TXT generation log records the CSL filename and hash, mappings, source policy, duplicate counts, and match outcomes without recording lookup-key values.
 
@@ -93,6 +95,14 @@ geometry. Without a CSL, the radius has no effect.
 
 ### Data Format Reference
 
+These are the standard template columns, not a list of required values.
+Usable latitude and longitude are needed to map each record; cell-site-based
+imports can obtain them from a separate cell site list. `Timestamp` is optional
+unless an import date/time filter is enabled. `Azimuth` and `Accuracy` are
+optional. The wizard requires a mapped `Distance` column for Distance from
+Cell Site imports, but individual missing distances omit the distance band
+rather than the usable location.
+
 **For Cell Site/Sector Data:**
 - `Timestamp`, `Latitude`, `Longitude`, `Azimuth`
 
@@ -107,9 +117,9 @@ geometry. Without a CSL, the radius has no effect.
 
 The templates use one combined `Timestamp` column, which is recommended. Input files may instead use separate `Date` and `Time` columns, including common variants such as `Conn. Date` and `Conn. Time (UTC)`. Common combined fields such as `Start DateTime`, `StartTime`, `Record Open Date/Time`, and `Msg Send Date` are also recognized.
 
-### Supported Timestamp Formats
+### Supported Date and Time Formats
 
-The application supports **18+ timestamp formats**, including:
+The application supports many common date and time formats, including:
 
 **Common Formats:**
 - ISO: `2025-01-15T14:30:00`, `2025-01-15 14:30`, `2025/02/11 11:06:07`
@@ -118,16 +128,25 @@ The application supports **18+ timestamp formats**, including:
 - European: `15.01.2025 14:30:00`, `15.01.2025 14:30`
 - Time-only: `14:30:00`, `2:30 PM` (uses today's date)
 
-**Advanced Formats:**
-- Excel serial dates: `45696.7637037037`
-- With timezone: `2025-02-11 11:06:07.557 EST`, `2019/05/03 18:36:04 (GMT -4)`, `2025-01-15T14:30:00Z` (converted to UTC for KML)
-- Without timezone: Uses the selected source timezone, either a named timezone or a fixed UTC offset (UTC by default); an explicit offset in a record takes precedence
+**Other Date and Time Options:**
+- **Excel dates:** The app can read dates and times that Excel stores as numbers, such as `45696.7637037037`
+- **With timezone information:** Examples include `2025-02-11 11:06:07.557 EST`, `2019/05/03 18:36:04 (GMT -4)`, and `2025-01-15T14:30:00Z`. An explicit offset, such as `-05:00`, takes priority over your selected source timezone. Resolved times are converted to UTC for the KML and GeoJSON timeline metadata
+- **Without timezone information:** The app uses your selected source timezone, either a named timezone or a fixed UTC offset (UTC by default)
 - Fixed offsets are shown with familiar North American abbreviations where useful; the numeric UTC offset is authoritative because abbreviations can be ambiguous
 - Slash or dash dates use the selected Month-Day-Year or Day-Month-Year order; year-first dates use Year-Month-Day unless Year-Day-Month is selected. Review the wizard's suggested date order before import
 - Named timezones apply historical daylight-saving rules. When a local time happens twice or is skipped during a clock change, usable location information is kept without a date/time in both KML and GeoJSON. The app reports source-row numbers rather than guessing a time; an explicit UTC offset can resolve the uncertainty
-- Fractional seconds in text timestamps are discarded. Time-only entries use today's date; verify that this matches the source records before use
+- **Parts of a second:** For dates and times written as text, digits after the seconds are ignored. For example, `14:30:00.123` is treated as `14:30:00`. Time-only entries use today's date; verify that this matches the source records before use
 
-**Missing-data outcomes:** Missing azimuth uses a 360-degree visualization; missing distance omits the distance band; missing Location Point accuracy uses the configured default (initially 0). With a zero default, missing accuracy produces a visible point without an accuracy circle in both KML and GeoJSON. Supplied zero accuracy also produces a point without a circle: zero means unknown accuracy, not an exact location. Positive supplied accuracy still produces a circle; a positive configured default is a visualization assumption, not measured accuracy. Invalid accuracy produces a point without an accuracy circle. These defaults and omissions are summarized in warnings and the TXT log and must be independently verified. Exported records remain initially hidden until enabled in the viewer.
+**Missing-data outcomes:**
+- Missing antenna direction (azimuth) uses a 360-degree visualization.
+- Missing distance omits the distance band.
+- For Location Point data, a positive accuracy value draws an accuracy circle. Missing accuracy uses the configured default radius (initially 0).
+- A zero default means no accuracy radius is assumed; it does not mean the location is exact. The point remains visible without a circle.
+- A source accuracy value of zero also means unknown accuracy, not an exact location, and draws no circle.
+- Invalid accuracy produces a point without an accuracy circle, even when a positive default is configured.
+- A positive default is your visualization assumption, not measured accuracy.
+
+Warnings and the TXT log summarize these defaults and omissions, which must be independently verified. Exported records remain initially hidden until enabled in the viewer.
 
 **Missing or unreadable dates and times:** All record types retain usable location information when the date/time is missing, unreadable, or uncertain. These records are labeled `date/time unavailable` and have no timeline time. Warnings and the TXT log count records exported without timeline metadata, including a separate count for daylight-saving conflicts. Timestamp mapping is optional when no import date/time filter is enabled; for separate columns, map both Date and Time or leave both unmapped. An active import date/time range requires timestamp mapping and excludes records with unresolved times because the app cannot confirm that they fall within the selected range. Invalid coordinates are still skipped.
 
@@ -221,7 +240,7 @@ At startup, the main program window appears behind the **Important Disclaimers &
 
 - **This tool is in continuous development and may contain errors.**
 - **This tool is designed for quick preliminary review and visualization. All outputs require verification.**
-- **NO COVERAGE ESTIMATIONS**: All shaded areas, wedges, and circles are visual representations only - NOT coverage depictions
+- **NO RF COVERAGE ESTIMATES**: All shaded areas, wedges, and circles are visual representations only; they do not show radio signal coverage. The app does not calculate device locations or RF coverage
 - Distance from cell site measurements, sector areas, and location accuracy should all be independently validated
 - This tool does not replace professional forensic analysis or expert work
 
