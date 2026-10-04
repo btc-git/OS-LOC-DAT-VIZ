@@ -4,8 +4,16 @@
 
 ## [Unreleased]
 
+## [2.0.0-beta.3] - 2026-10-04
+
+### Fixed
+- Corrected the application, Windows executable metadata, and README version labels for the new release. The published beta.2 build still displayed beta.1 internally.
+
+## [2.0.0-beta.2] - 2026-10-04
+
 ### Changed
 - All record types now retain usable location information when dates/times are missing, unreadable, or unresolved during daylight-saving transitions. Matching KML and GeoJSON events are labeled `date/time unavailable` without invented timeline times; warnings and the TXT log report the untimed records and daylight-saving conflicts. Import date/time filters remain strict and exclude records whose times cannot be confirmed within the selected range.
+- Simplified startup help text and corrected typos while preserving the accuracy, timezone, privacy, and preliminary-review warnings.
 
 ## [2.0.0-beta.1] - 2026-10-03
 

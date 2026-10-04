@@ -177,6 +177,17 @@ node --check tools/plugin_performance_harness.mjs
 
 **Building the Executable:**
 
+Before each release:
+- Update `APP_VERSION` in [version.py](version.py).
+- Match `ProductVersion` in [version_info.txt](version_info.txt), and update its
+  `filevers`, `prodvers`, and `FileVersion` numeric values. For example,
+  `2.0.0-beta.3` uses `(2, 0, 0, 3)` and `2.0.0.3`.
+- Update the version footer below and add the release entry in
+  [CHANGELOG.md](CHANGELOG.md). Keep historical entries unchanged.
+- After building, confirm the app's displayed version and the executable's
+  Properties > Details match the intended release, then use the same version
+  for the GitHub release and tag. Viewer and plugin versions are independent.
+
 1. Use Python 3.11.3.
 2. Install the complete pinned build environment:
    ```bash
@@ -229,5 +240,5 @@ This program is distributed in the hope that it will be useful, but WITHOUT ANY 
 
 ---
 Copyright (c) 2025-2026 CrimLawTech LLC
-**Version 2.0.0-beta.1**
+**Version 2.0.0-beta.3**
 _Open Source Location Data Visualization Tool_
