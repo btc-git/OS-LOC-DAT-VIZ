@@ -1,7 +1,7 @@
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(2, 0, 0, 3),
-    prodvers=(2, 0, 0, 3),
+    filevers=(2, 0, 0, 4),
+    prodvers=(2, 0, 0, 4),
     mask=0x3f,
     flags=0x2,
     OS=0x40004,
@@ -16,12 +16,12 @@ VSVersionInfo(
         [
           StringStruct('CompanyName', 'CrimLawTech LLC'),
           StringStruct('FileDescription', 'Open Source Location Data Visualizer'),
-          StringStruct('FileVersion', '2.0.0.3'),
+          StringStruct('FileVersion', '2.0.0.4'),
           StringStruct('InternalName', 'OS-LocationDataVisualizer'),
           StringStruct('LegalCopyright', 'Copyright (c) 2025-2026 CrimLawTech LLC'),
           StringStruct('OriginalFilename', 'OS-LocationDataVisualizer.exe'),
           StringStruct('ProductName', 'Open Source Location Data Visualizer'),
-          StringStruct('ProductVersion', '2.0.0-beta.3')
+          StringStruct('ProductVersion', '2.0.0-beta.4')
         ]
       )
     ]),

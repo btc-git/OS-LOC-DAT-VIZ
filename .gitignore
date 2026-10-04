@@ -28,6 +28,7 @@ node_modules/
 /*.kml
 /*.kmz
 /*.geojson
+/*.geolibre
 /*.txt
 !/version_info.txt
 !/requirements-build.txt
@@ -35,6 +36,9 @@ diagnostics/
 exports/
 local-data/
 outputs/
+# Staged exports and recovery backups may contain source-record data.
+.osloc-*.tmp
+.osloc-*.bak
 
 # IDE
 .idea/

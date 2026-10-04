@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+## [2.0.0-beta.4] - 2026-10-04
+
+### Fixed
+- CSV records, cell site lists, and marker imports now retain source coordinate text and leading-zero identifiers before numeric inference can discard them. Numeric geometry calculations, derived-coordinate formatting, and existing missing-value handling remain unchanged.
+- TXT logs now use source, cell site list, and marker hashes captured during validated loads instead of hashing later file versions. Loads reject files that change during parsing/hashing, and repeated marker imports from different versions of one file retain both hashes.
+- Saving now confirms replacement of all existing sibling outputs, including the viewer project when requested. KML, GeoJSON, TXT, and the optional GeoLibre project are staged before replacement; ordinary I/O failures restore previous outputs or report retained recovery backups. A log preparation/save failure now prevents an incomplete output set rather than saving maps without their log.
+
 ## [2.0.0-beta.3] - 2026-10-04
 
 ### Fixed

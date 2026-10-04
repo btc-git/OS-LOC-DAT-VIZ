@@ -75,6 +75,12 @@ They do not replace the stable download above.
 
 Each generation writes a `.kml`, `.geojson`, and `.txt` file with the same base name. The log records source and output SHA-256 hashes (digital fingerprints), column mappings, date/time interpretation, visualization settings, counts of included and skipped records, and warnings without copying source-record contents.
 
+CSV imports preserve coordinate text and leading zeros in identifiers, while keeping the existing missing-value rules. Geographic calculations still use ordinary numeric coordinates; only source/evidence text retains all supplied digits, and derived geometry remains formatted to six decimal places. Excel numeric cells retain their existing spreadsheet precision.
+
+Input hashes are captured when records, cell site lists, or marker lists are loaded. Parsing and hashing use the same open file, with file identity, size, and modification timestamps checked for changes during loading; a detected change stops the load and requires reloading. Later edits or removal of an input do not replace its captured hash in the generation log. Importing different versions of one marker-list file records each loaded version separately.
+
+Before saving, the application confirms replacement of any existing sibling outputs, not just the selected GeoJSON. All required files, including the TXT log and the optional viewer project, are staged before existing files are replaced. An ordinary save failure restores the previous output set; if recovery itself is blocked, the error identifies retained backup files. This protects against normal I/O failures, but does not provide a crash-atomic multi-file transaction: keep backups of important files independently.
+
 **Process and Open in Viewer** also creates a same-named `.geolibre` companion beside the outputs. This small viewer project does not duplicate the source records: it references the GeoJSON and stores its path, display name, dataset identifier, map extent, and viewer/plugin settings so GeoLibre can reopen it with the OS-LOC interface and frame its events automatically. Keep the `.geolibre` file with its GeoJSON; moving or renaming the GeoJSON can break the reference. The project may be deleted without affecting the KML, GeoJSON, or TXT files if convenient reopening is not needed. **Open Viewer** starts a clean, plugin-enabled session. Use the prominent **Load GeoJSON** button beneath the viewer-panel title for previous OS-LOC exports; repeat it to add more record sets. KML files remain available through GeoLibre drag and drop. On first use, the application verifies and extracts its pinned GeoLibre portable bundle and installs the included OS-LOC viewer plugin in GeoLibre's per-user plugin directory. Because GeoLibre enforces one running instance per Windows session, close any other GeoLibre window before starting the included viewer.
 
 For original carrier records that do not match a template, the import wizard opens automatically. It supports CSV, XLS, and XLSX files. Select the worksheet, the row containing the column names, and the record type, then match the source columns to the application fields. Its live preview shows the first 25 source rows with each original column name and the application field currently matched to it. Azimuth may be left unmapped when it is unavailable; the application will use a 360-degree visualization. Imported records are prepared in memory and the original file is not modified.
@@ -200,7 +206,7 @@ Before each release:
 - Update `APP_VERSION` in [version.py](version.py).
 - Match `ProductVersion` in [version_info.txt](version_info.txt), and update its
   `filevers`, `prodvers`, and `FileVersion` numeric values. For example,
-  `2.0.0-beta.3` uses `(2, 0, 0, 3)` and `2.0.0.3`.
+  `2.0.0-beta.4` uses `(2, 0, 0, 4)` and `2.0.0.4`.
 - Update the version footer below and add the release entry in
   [CHANGELOG.md](CHANGELOG.md). Keep historical entries unchanged.
 - After building, confirm the app's displayed version and the executable's
@@ -259,5 +265,5 @@ This program is distributed in the hope that it will be useful, but WITHOUT ANY 
 
 ---
 Copyright (c) 2025-2026 CrimLawTech LLC
-**Version 2.0.0-beta.3**
+**Version 2.0.0-beta.4**
 _Open Source Location Data Visualization Tool_

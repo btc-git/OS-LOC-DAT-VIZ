@@ -22,7 +22,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PyQt6.QtCore import QTimer
 from PyQt6.QtTest import QSignalSpy
 from PyQt6.QtWidgets import (
-    QApplication, QAbstractButton, QHBoxLayout, QLabel, QScrollArea, QToolButton,
+    QApplication, QAbstractButton, QFileDialog, QHBoxLayout, QLabel, QScrollArea, QToolButton,
 )
 
 import geolibre_launcher
@@ -916,6 +916,7 @@ class GenerationActionTests(unittest.TestCase):
                 "Save Processed Data Files",
                 str(root / "T-Mobile_Location_Estimates.geojson"),
                 "GeoJSON Files (*.geojson)",
+                options=QFileDialog.Option.DontConfirmOverwrite,
             )
             self.assertEqual("<kml/>", kml_path.read_text(encoding="utf-8"))
             self.assertTrue(selected_path.is_file())
@@ -946,6 +947,7 @@ class GenerationActionTests(unittest.TestCase):
                 "source_date_order": "MDY",
                 "duration_minutes": 30,
             }
+            window.current_generation_source_sha256 = window.calculate_file_sha256(source_path)
             window.current_generation_type = "Location Point"
             window.current_import_metadata = {
                 "worksheet": None,
@@ -1019,9 +1021,14 @@ class GenerationActionTests(unittest.TestCase):
                 "reference_site_radius_miles": 25.0,
                 "reference_site_color": "ff000000",
             }
+            window.current_generation_source_sha256 = window.calculate_file_sha256(source_path)
             window.current_generation_type = "Distance from Tower"
             window.current_generation_marker_count = 3
             window.current_marker_import_files = [str(marker_path)]
+            window.current_marker_import_sources = [{
+                "file_path": str(marker_path),
+                "source_sha256": window.calculate_file_sha256(marker_path),
+            }]
             window.current_import_metadata = {
                 "worksheet": None,
                 "header_row": 1,
@@ -1030,6 +1037,7 @@ class GenerationActionTests(unittest.TestCase):
                 "cell_site_list": {
                     "enabled": True,
                     "file_path": str(cell_site_path),
+                    "source_sha256": window.calculate_file_sha256(cell_site_path),
                     "file_name": cell_site_path.name,
                     "worksheet": None,
                     "header_row": 1,

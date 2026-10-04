@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape as xml_escape
 from PyQt6.QtCore import QThread, pyqtSignal
+from source_io import read_csv_text, read_hashed_source
 
 
 class TimestampResolutionError(Exception):
@@ -81,6 +82,7 @@ class KMLGenerator(QThread):
         self.data_type = data_type
         self.settings = settings
         self.dataframe = dataframe
+        self.source_sha256 = None
         self.reference_sites = reference_sites
         self.markers = list(markers or [])
         self.audit_summary = {}
@@ -672,9 +674,14 @@ class KMLGenerator(QThread):
                 # Read file based on extension (with Excel date handling)
                 file_extension = Path(self.data_file).suffix.lower()
                 if file_extension == '.xlsx':
-                    df = pd.read_excel(self.data_file, engine='openpyxl')
+                    df, self.source_sha256 = read_hashed_source(
+                        self.data_file,
+                        lambda handle: pd.read_excel(handle, engine='openpyxl'),
+                    )
                 elif file_extension == '.csv':
-                    df = pd.read_csv(self.data_file)
+                    df, self.source_sha256 = read_hashed_source(
+                        self.data_file, read_csv_text
+                    )
                 else:
                     raise ValueError(f"Unsupported file format: {file_extension}")
             

@@ -14,6 +14,11 @@ startup disclaimer's visibility and dismissal behavior. The
 Node.js contract test covers project-scoped simplified viewer chrome. Tests use
 Qt's offscreen platform and do not require opening the desktop application.
 
+Source/output safety regressions cover real CSV import precision and leading-zero
+IDs, ordinary-coordinate geometry parity, load-bound hashes, CSL joins, marker
+file versions, sibling overwrite cancellation, staged-save failures, replacement
+rollback, and explicit backup retention when recovery fails.
+
 Terminology regressions check Cell Site/Sector and Distance from Cell Site labels in the
 UI, notices, templates, generation logs, KML/GeoJSON names and descriptions, and
 viewer event types. Internal export identifiers and legacy coordinate headers

@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
 )
 
 from kml_generator import KMLGenerator, TimestampResolutionError
+from source_io import read_csv_text, read_hashed_source
 
 
 NAMED_TIMEZONE_CHOICES = [
@@ -66,7 +67,8 @@ class SourceFileLoadWorker(QThread):
             elif suffix == '.xls':
                 dataframe = pd.read_excel(file_path, nrows=1)
             elif suffix == '.csv':
-                dataframe = pd.read_csv(file_path, nrows=1)
+                with Path(file_path).open('rb') as handle:
+                    dataframe = read_csv_text(handle, nrows=1)
             else:
                 raise ValueError(
                     f"Unsupported file format: {suffix}. Please use .csv, .xls, or .xlsx files."
@@ -77,14 +79,20 @@ class SourceFileLoadWorker(QThread):
             }
 
         if suffix in ('.xls', '.xlsx'):
-            with pd.ExcelFile(file_path) as workbook:
-                sheet_names = list(workbook.sheet_names)
-                selected_sheet = sheet_name or sheet_names[0]
-                raw_dataframe = workbook.parse(
-                    sheet_name=selected_sheet, header=None
-                )
+            def read_workbook(handle):
+                with pd.ExcelFile(handle) as workbook:
+                    sheet_names = list(workbook.sheet_names)
+                    selected_sheet = sheet_name or sheet_names[0]
+                    raw_dataframe = workbook.parse(
+                        sheet_name=selected_sheet, header=None
+                    )
+                return sheet_names, selected_sheet, raw_dataframe
+
+            records, source_sha256 = read_hashed_source(file_path, read_workbook)
+            sheet_names, selected_sheet, raw_dataframe = records
             return {
                 'file_path': str(file_path),
+                'source_sha256': source_sha256,
                 'sheet_names': sheet_names,
                 'sheet_name': selected_sheet,
                 'raw_dataframe': raw_dataframe,
@@ -92,12 +100,16 @@ class SourceFileLoadWorker(QThread):
             }
 
         if suffix == '.csv':
+            dataframe, source_sha256 = read_hashed_source(
+                file_path, lambda handle: read_csv_text(handle, header=header_row)
+            )
             return {
                 'file_path': str(file_path),
+                'source_sha256': source_sha256,
                 'sheet_names': ['CSV'],
                 'sheet_name': 'CSV',
                 'raw_dataframe': None,
-                'dataframe': pd.read_csv(file_path, header=header_row),
+                'dataframe': dataframe,
             }
 
         raise ValueError(
@@ -307,6 +319,7 @@ class ImportWizardDialog(QDialog):
         self.setSizeGripEnabled(True)
         self.source_path = None
         self.source_dataframe = None
+        self.source_sha256 = None
         self.normalized_dataframe = None
         self.selected_data_type = None
         self.selected_timezone_name = None
@@ -331,6 +344,7 @@ class ImportWizardDialog(QDialog):
         self._cached_raw_dataframe = None
         self.cell_site_path = None
         self.cell_site_dataframe = None
+        self.cell_site_sha256 = None
         self.selected_cell_site_sheet_name = None
         self.selected_cell_site_header_row = 1
         self._cached_cell_site_key = None
@@ -853,6 +867,7 @@ class ImportWizardDialog(QDialog):
     def load_cell_site_file(self, file_path, background=True):
         self.cell_site_path = file_path
         self.cell_site_dataframe = None
+        self.cell_site_sha256 = None
         self._cached_cell_site_key = None
         self._cached_cell_site_raw_dataframe = None
         self._cell_site_background_loading_enabled = background
@@ -912,6 +927,7 @@ class ImportWizardDialog(QDialog):
         self.reset_timezone_defaults()
         self.source_path = file_path
         self.source_dataframe = None
+        self.source_sha256 = None
         self._cached_source_key = None
         self._cached_raw_dataframe = None
         self._background_loading_enabled = background
@@ -1010,6 +1026,7 @@ class ImportWizardDialog(QDialog):
         """Apply records returned by the active source worker."""
         if token != self._source_load_token:
             return
+        self.source_sha256 = result['source_sha256']
 
         sheet_names = result['sheet_names']
         selected_sheet = result['sheet_name']
@@ -1042,6 +1059,7 @@ class ImportWizardDialog(QDialog):
         if token != self._source_load_token:
             return
         self.source_dataframe = None
+        self.source_sha256 = None
         self.source_path = None
         self.drop_zone.set_selected_filename(None)
         self.set_source_loading(False)
@@ -1061,6 +1079,7 @@ class ImportWizardDialog(QDialog):
         """Apply the cell site list returned by the active worker."""
         if token != self._cell_site_load_token:
             return
+        self.cell_site_sha256 = result['source_sha256']
 
         sheet_names = result['sheet_names']
         selected_sheet = result['sheet_name']
@@ -1097,6 +1116,7 @@ class ImportWizardDialog(QDialog):
         if token != self._cell_site_load_token:
             return
         self.cell_site_dataframe = None
+        self.cell_site_sha256 = None
         self.cell_site_path = None
         self.cell_site_drop_zone.set_selected_filename(None)
         self.cell_site_drop_zone.selected_label.setText(
@@ -1816,6 +1836,7 @@ class ImportWizardDialog(QDialog):
         metadata = {
             'enabled': True,
             'file_path': str(self.cell_site_path),
+            'source_sha256': self.cell_site_sha256,
             'file_name': Path(self.cell_site_path).name,
             'worksheet': (
                 self.cell_site_sheet_combo.currentText() if is_excel else None

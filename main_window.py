@@ -4,6 +4,7 @@ Licensed under the GNU General Public License v3.0 - see LICENSE file for detail
 """
 
 import hashlib
+import json
 import math
 import re
 import subprocess
@@ -24,7 +25,9 @@ from PyQt6.QtCore import Qt, QSettings, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont, QColor, QIcon, QPixmap, QPainter, QPen, QShowEvent
 
 from dialogs import DisclaimerDialog
-from geolibre_launcher import GeoLibreLaunchWorker
+from geolibre_launcher import GeoLibreLaunchWorker, build_geolibre_project_text
+from output_io import write_output_set
+from source_io import read_csv_text, read_hashed_source
 from import_wizard import (
     FIXED_UTC_OFFSETS,
     NAMED_TIMEZONE_CHOICES,
@@ -60,8 +63,10 @@ class MainWindow(QMainWindow):
         # Initialize variables
         self.data_file = None
         self.imported_dataframe = None
+        self.source_sha256 = None
         self.reference_sites_dataframe = None
         self.marker_import_files = []
+        self.marker_import_sources = []
         self.import_metadata = None
         self.import_target_timezone_name = None
         self.import_target_offset_minutes = None
@@ -70,9 +75,11 @@ class MainWindow(QMainWindow):
         self.current_generation_settings = {}
         self.current_generation_type = None
         self.current_generation_source_file = None
+        self.current_generation_source_sha256 = None
         self.current_import_metadata = None
         self.current_generation_marker_count = 0
         self.current_marker_import_files = []
+        self.current_marker_import_sources = []
         self.generation_started_utc = None
         self.open_viewer_after_generation = False
         self.viewer_launcher = None
@@ -972,6 +979,7 @@ class MainWindow(QMainWindow):
         self.clear_marker_rows()
         self.data_file = dialog.source_path
         self.imported_dataframe = dialog.normalized_dataframe
+        self.source_sha256 = dialog.source_sha256
         self.reference_sites_dataframe = (
             dialog.reference_sites_dataframe.copy()
             if dialog.reference_sites_dataframe is not None else None
@@ -1148,6 +1156,7 @@ class MainWindow(QMainWindow):
             self.clear_marker_rows()
             self.data_file = file_path
             self.imported_dataframe = None
+            self.source_sha256 = None
             self.reference_sites_dataframe = None
             self.import_metadata = None
             self.import_target_timezone_name = None
@@ -1475,6 +1484,7 @@ class MainWindow(QMainWindow):
     def clear_marker_rows(self):
         self.marker_table.setRowCount(0)
         self.marker_import_files = []
+        self.marker_import_sources = []
         self.update_marker_count()
 
     def update_marker_count(self):
@@ -1497,12 +1507,15 @@ class MainWindow(QMainWindow):
     def read_marker_dataframe(file_path):
         suffix = Path(file_path).suffix.lower()
         if suffix == '.csv':
-            return pd.read_csv(file_path)
-        if suffix == '.xlsx':
-            return pd.read_excel(file_path, engine='openpyxl')
-        if suffix == '.xls':
-            return pd.read_excel(file_path, engine='xlrd')
-        raise ValueError('Marker lists must be CSV, XLS, or XLSX files')
+            reader = read_csv_text
+        elif suffix in ('.xlsx', '.xls'):
+            engine = 'openpyxl' if suffix == '.xlsx' else 'xlrd'
+            reader = lambda handle: pd.read_excel(handle, engine=engine)
+        else:
+            raise ValueError('Marker lists must be CSV, XLS, or XLSX files')
+        dataframe, source_sha256 = read_hashed_source(file_path, reader)
+        dataframe.attrs['source_sha256'] = source_sha256
+        return dataframe
 
     def import_marker_file(self, file_path):
         try:
@@ -1522,6 +1535,12 @@ class MainWindow(QMainWindow):
             marker_path = str(Path(file_path))
             if marker_path not in self.marker_import_files:
                 self.marker_import_files.append(marker_path)
+            source = {
+                'file_path': marker_path,
+                'source_sha256': dataframe.attrs['source_sha256'],
+            }
+            if source not in self.marker_import_sources:
+                self.marker_import_sources.append(source)
             self.add_status_message(
                 f"✅ Added {len(markers)} marker"
                 f"{'s' if len(markers) != 1 else ''} from "
@@ -1727,8 +1746,14 @@ class MainWindow(QMainWindow):
         self.current_generation_settings = settings.copy()
         self.current_generation_type = data_type
         self.current_generation_source_file = self.data_file
+        self.current_generation_source_sha256 = (
+            self.source_sha256 if self.imported_dataframe is not None else None
+        )
         self.current_generation_marker_count = len(markers)
         self.current_marker_import_files = list(self.marker_import_files)
+        self.current_marker_import_sources = [
+            dict(source) for source in self.marker_import_sources
+        ]
         self.current_import_metadata = None
         if self.import_metadata:
             self.current_import_metadata = {
@@ -1793,13 +1818,49 @@ class MainWindow(QMainWindow):
             self,
             "Save Processed Data Files",
             start_dir,
-            "GeoJSON Files (*.geojson)"
+            "GeoJSON Files (*.geojson)",
+            options=QFileDialog.Option.DontConfirmOverwrite,
         )
         
         if selected_output_file:
+            output_path, geojson_path = self.visualization_output_paths(
+                selected_output_file
+            )
+            paths = [output_path, geojson_path, output_path.with_suffix('.txt')]
+            if open_viewer:
+                paths.append(output_path.with_suffix('.geolibre'))
+            existing_paths = [path for path in paths if path.exists()]
+            if existing_paths:
+                response = QMessageBox.question(
+                    self,
+                    "Replace Existing Output Files?",
+                    "The following output files already exist:\n\n"
+                    + "\n".join(str(path) for path in existing_paths)
+                    + "\n\nReplace these files?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
+                )
+                if response != QMessageBox.StandardButton.Yes:
+                    self.set_generation_actions_enabled(True)
+                    self.open_viewer_button.setEnabled(True)
+                    self.add_status_message("File save cancelled; existing outputs were not changed")
+                    return
             try:
+                if self.current_import_metadata is None and self.kml_generator:
+                    self.current_generation_source_sha256 = self.kml_generator.source_sha256
+                log_content = self.build_generation_log(
+                    geojson_path, output_contents=(kml_content, geojson_content)
+                )
+                project_content = None
+                if open_viewer:
+                    project_content = build_geolibre_project_text(
+                        geojson_path,
+                        json.loads(geojson_content),
+                        self.current_generation_settings.get('custom_label'),
+                    )
                 output_path, geojson_path = self.write_visualization_outputs(
-                    selected_output_file, kml_content, geojson_content
+                    selected_output_file, kml_content, geojson_content,
+                    log_content=log_content, project_content=project_content,
                 )
                 self.add_status_message(
                     f"✅ KML file saved successfully: {output_path.name}"
@@ -1818,17 +1879,9 @@ class MainWindow(QMainWindow):
                 )
                 return
 
-            log_path = output_path.with_suffix('.txt')
-            try:
-                log_path.write_text(self.build_generation_log(output_path), encoding='utf-8')
-                self.add_status_message(f"✅ Generation log saved: {log_path.name}")
-            except Exception as e:
-                self.add_status_message(f"⚠️ Output files were saved, but the generation log could not be saved: {str(e)}")
-                QMessageBox.warning(
-                    self,
-                    "Log Save Warning",
-                    f"The output files were saved, but their generation log could not be saved:\n\n{str(e)}"
-                )
+            self.add_status_message(
+                f"✅ Generation log saved: {output_path.with_suffix('.txt').name}"
+            )
 
             if open_viewer:
                 self.start_geolibre_viewer(geojson_path)
@@ -1926,22 +1979,30 @@ class MainWindow(QMainWindow):
             self.viewer_launcher = None
 
     @staticmethod
-    def write_visualization_outputs(output_file, kml_content, geojson_content):
+    def visualization_output_paths(output_file):
+        selected_path = Path(output_file)
+        geojson_path = (
+            selected_path if selected_path.suffix.lower() == '.geojson'
+            else selected_path.with_suffix('.geojson')
+        )
+        return selected_path.with_suffix('.kml'), geojson_path
+
+    @staticmethod
+    def write_visualization_outputs(output_file, kml_content, geojson_content,
+                                    *, log_content=None, project_content=None):
         """Write the required KML and GeoJSON siblings for one generation."""
         if not kml_content:
             raise ValueError("Generated KML content is empty")
         if not geojson_content:
             raise ValueError("Generated GeoJSON content is empty")
 
-        selected_path = Path(output_file)
-        if selected_path.suffix.lower() == '.geojson':
-            geojson_path = selected_path
-            output_path = selected_path.with_suffix('.kml')
-        else:
-            output_path = selected_path.with_suffix('.kml')
-            geojson_path = selected_path.with_suffix('.geojson')
-        output_path.write_text(kml_content, encoding='utf-8')
-        geojson_path.write_text(geojson_content, encoding='utf-8')
+        output_path, geojson_path = MainWindow.visualization_output_paths(output_file)
+        contents = {output_path: kml_content, geojson_path: geojson_content}
+        if log_content is not None:
+            contents[output_path.with_suffix('.txt')] = log_content
+        if project_content is not None:
+            contents[output_path.with_suffix('.geolibre')] = project_content
+        write_output_set(contents)
         return output_path, geojson_path
 
     @staticmethod
@@ -1972,14 +2033,22 @@ class MainWindow(QMainWindow):
             return "No Change (source timezone preserved)"
         return fixed_offset_label(int(offset_minutes or 0))
 
-    def build_generation_log(self, output_file):
+    def build_generation_log(self, output_file, *, output_contents=None):
         """Create the human-readable audit log for the completed generation."""
-        output_path = Path(output_file)
-        geojson_path = output_path.with_suffix('.geojson')
+        output_path, geojson_path = self.visualization_output_paths(output_file)
         source_path = Path(self.current_generation_source_file)
-        source_hash = self.calculate_file_sha256(source_path)
-        output_hash = self.calculate_file_sha256(output_path)
-        geojson_hash = self.calculate_file_sha256(geojson_path) if geojson_path.exists() else 'Not generated'
+        source_hash = self.current_generation_source_sha256
+        if not source_hash:
+            raise ValueError("The loaded source file SHA-256 is missing; reload the source records.")
+        has_geojson = output_contents is not None or geojson_path.exists()
+        if output_contents is not None:
+            output_hash, geojson_hash = (
+                hashlib.sha256(content.encode('utf-8')).hexdigest()
+                for content in output_contents
+            )
+        else:
+            output_hash = self.calculate_file_sha256(output_path)
+            geojson_hash = self.calculate_file_sha256(geojson_path) if has_geojson else 'Not generated'
         completed_utc = datetime.now(timezone.utc)
         settings = self.current_generation_settings
         summary = self.kml_generator.audit_summary if self.kml_generator else {}
@@ -2010,7 +2079,7 @@ class MainWindow(QMainWindow):
             f"Source SHA-256: {source_hash}",
             f"Output KML: {output_path.name}",
             f"Output KML SHA-256: {output_hash}",
-            f"Output GeoJSON: {geojson_path.name if geojson_path.exists() else 'Not generated'}",
+            f"Output GeoJSON: {geojson_path.name if has_geojson else 'Not generated'}",
             f"Output GeoJSON SHA-256: {geojson_hash}",
             f"Input workflow: {'Import Wizard' if self.current_import_metadata else 'Template/direct file'}",
             f"Record type: {data_type_label(self.current_generation_type)}",
@@ -2039,11 +2108,9 @@ class MainWindow(QMainWindow):
                 cell_site_path = (
                     Path(cell_site_path_value) if cell_site_path_value else None
                 )
-                cell_site_hash = (
-                    self.calculate_file_sha256(cell_site_path)
-                    if cell_site_path and cell_site_path.is_file()
-                    else 'Unavailable'
-                )
+                cell_site_hash = cell_site_metadata.get('source_sha256')
+                if not cell_site_hash:
+                    raise ValueError("The loaded cell site list SHA-256 is missing; reload the cell site list.")
                 lines.extend([
                     "",
                     "Cell site list",
@@ -2109,16 +2176,15 @@ class MainWindow(QMainWindow):
             "Markers",
             f"Marker rows accepted: {self.current_generation_marker_count}",
             f"Static markers generated: {summary.get('markers_generated', 0)}",
-            f"Marker list files imported: {len(self.current_marker_import_files)}",
+            f"Marker list files imported: {len(self.current_marker_import_sources)}",
         ])
-        for marker_file_index, marker_file_value in enumerate(
-            self.current_marker_import_files, 1
+        for marker_file_index, marker_source in enumerate(
+            self.current_marker_import_sources, 1
         ):
-            marker_file_path = Path(marker_file_value)
-            marker_file_hash = (
-                self.calculate_file_sha256(marker_file_path)
-                if marker_file_path.is_file() else 'Unavailable'
-            )
+            marker_file_path = Path(marker_source['file_path'])
+            marker_file_hash = marker_source.get('source_sha256')
+            if not marker_file_hash:
+                raise ValueError("An imported marker list SHA-256 is missing; reload the marker list.")
             lines.extend([
                 f"Marker list {marker_file_index}: {marker_file_path.name}",
                 f"Marker list {marker_file_index} SHA-256: {marker_file_hash}",

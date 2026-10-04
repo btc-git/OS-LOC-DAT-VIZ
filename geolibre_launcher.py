@@ -16,6 +16,7 @@ import zipfile
 from pathlib import Path
 
 from PyQt6.QtCore import QThread, pyqtSignal
+from output_io import write_output_set
 
 
 GEOLIBRE_VERSION = "3.0.0"
@@ -295,16 +296,9 @@ def create_empty_geolibre_project(project_path):
     return project_path
 
 
-def create_geolibre_project(geojson_path, project_path=None, display_name=None):
-    """Create a GeoLibre project that restores the generated local GeoJSON layer."""
+def build_geolibre_project_text(geojson_path, geojson_payload, display_name=None):
+    """Serialize a viewer project for a generated or staged GeoJSON layer."""
     geojson_path = Path(geojson_path).resolve()
-    if not geojson_path.is_file():
-        raise GeoLibreLaunchError(f"Generated GeoJSON file is missing: {geojson_path}")
-
-    try:
-        geojson_payload = json.loads(geojson_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        raise GeoLibreLaunchError(f"Generated GeoJSON could not be read: {error}") from error
     if geojson_payload.get("type") != "FeatureCollection":
         raise GeoLibreLaunchError("Generated GeoJSON is not a FeatureCollection")
 
@@ -347,10 +341,26 @@ def create_geolibre_project(geojson_path, project_path=None, display_name=None):
         dataset_id,
     )
 
+    return json.dumps(project, indent=2) + "\n"
+
+
+def create_geolibre_project(geojson_path, project_path=None, display_name=None):
+    """Create a GeoLibre project that restores the generated local GeoJSON layer."""
+    geojson_path = Path(geojson_path).resolve()
+    if not geojson_path.is_file():
+        raise GeoLibreLaunchError(f"Generated GeoJSON file is missing: {geojson_path}")
+    try:
+        geojson_payload = json.loads(geojson_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise GeoLibreLaunchError(f"Generated GeoJSON could not be read: {error}") from error
     project_path = (
         Path(project_path) if project_path else geojson_path.with_suffix(".geolibre")
     )
-    project_path.write_text(json.dumps(project, indent=2) + "\n", encoding="utf-8")
+    write_output_set({
+        project_path: build_geolibre_project_text(
+            geojson_path, geojson_payload, display_name
+        ),
+    })
     return project_path
 
 

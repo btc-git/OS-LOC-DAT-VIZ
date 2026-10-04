@@ -714,10 +714,10 @@ class ImportWizardDialogUITests(unittest.TestCase):
 
             dialog.accept_import()
 
-            self.assertEqual(43.15, dialog.normalized_dataframe.loc[0, "Latitude"])
-            self.assertEqual(-77.61, dialog.normalized_dataframe.loc[0, "Longitude"])
-            self.assertEqual(135, dialog.normalized_dataframe.loc[0, "Azimuth"])
-            self.assertEqual(0.31, dialog.normalized_dataframe.loc[0, "Distance"])
+            self.assertEqual("43.15", dialog.normalized_dataframe.loc[0, "Latitude"])
+            self.assertEqual("-77.61", dialog.normalized_dataframe.loc[0, "Longitude"])
+            self.assertEqual("135", dialog.normalized_dataframe.loc[0, "Azimuth"])
+            self.assertEqual("0.31", dialog.normalized_dataframe.loc[0, "Distance"])
             self.assertEqual(1, dialog.selected_cell_site_metadata["matched_rows"])
             self.assertEqual([], dialog.selected_cell_site_metadata["unmatched_source_rows"])
             self.assertEqual([], dialog.selected_cell_site_metadata["missing_key_source_rows"])
@@ -731,9 +731,9 @@ class ImportWizardDialogUITests(unittest.TestCase):
             )
             self.assertEqual(
                 {
-                    "Site ID": 1001.0,
-                    "Latitude": 43.15,
-                    "Longitude": -77.61,
+                    "Site ID": "1001",
+                    "Latitude": "43.15",
+                    "Longitude": "-77.61",
                     "CSL Source Rows": (2,),
                 },
                 dialog.reference_sites_dataframe.iloc[0].to_dict(),
