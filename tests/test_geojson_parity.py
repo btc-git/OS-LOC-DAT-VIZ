@@ -309,7 +309,7 @@ class GeoJSONParityTests(unittest.TestCase):
                 'generate_gps_kml',
                 'generate_gps_geojson',
                 {'Accuracy': 100},
-                3,
+                4,
             ),
         )
 
@@ -354,6 +354,112 @@ class GeoJSONParityTests(unittest.TestCase):
                     'osloc_start_time' not in feature['properties']
                     for feature in json.loads(geojson_text)['features']
                 ))
+
+    def test_all_record_types_retain_unresolved_times_without_inventing_dates(self):
+        cases = (
+            ('Tower/Sector', 'generate_cell_tower', {'Azimuth': 240}),
+            ('Tower/Sector', 'generate_cell_tower', {}),
+            ('Distance from Tower', 'generate_distance_from_tower',
+             {'Azimuth': 240, 'Distance': 2.0}),
+            ('Distance from Tower', 'generate_distance_from_tower', {'Azimuth': 240}),
+            ('Distance from Tower', 'generate_distance_from_tower', {'Distance': 2.0}),
+            ('Distance from Tower', 'generate_distance_from_tower', {}),
+            ('Location Point', 'generate_gps', {'Accuracy': 100}),
+            ('Location Point', 'generate_gps', {'Accuracy': 0}),
+        )
+        timestamps = [
+            None, '', '   ', float('nan'), pd.NaT, 'not a timestamp',
+            '2024-11-03 01:30:00', '2024-03-10 02:30:00',
+            '2024-11-03T01:30:00-04:00', '2024-11-03T01:30:00-05:00',
+        ]
+        for data_type, method_prefix, fields in cases:
+            for consolidated in (False, True):
+                with self.subTest(data_type=data_type, fields=fields,
+                                  consolidated=consolidated):
+                    settings = generator_settings()
+                    settings.update({
+                        'source_timezone_name': 'America/New_York',
+                        'source_header_row': 5,
+                        'consolidate_event_placemarks': consolidated,
+                    })
+                    records = pd.DataFrame([
+                        {'Timestamp': timestamp, 'Latitude': '43.15000001',
+                         'Longitude': '-77.61000001', **fields}
+                        for timestamp in timestamps
+                    ])
+                    records.loc[len(records)] = {
+                        'Timestamp': None, 'Latitude': 999,
+                        'Longitude': '-77.61000001', **fields,
+                    }
+                    generator = KMLGenerator('', data_type, settings)
+                    messages = []
+                    generator.status_message.connect(messages.append)
+
+                    kml_text = getattr(generator, method_prefix + '_kml')(records)
+                    geojson_text = getattr(generator, method_prefix + '_geojson')(records)
+
+                    self.assertEqual(
+                        kml_primitive_counts_by_event(kml_text),
+                        geojson_primitive_counts_by_event(geojson_text),
+                    )
+                    self.assertEqual(10, len(kml_primitive_counts_by_event(kml_text)))
+                    summary = generator.audit_summary
+                    self.assertEqual(11, summary['input_rows'])
+                    self.assertEqual(10, summary['generated_rows'])
+                    self.assertEqual(8, summary['generated_without_timeline'])
+                    self.assertEqual(2, summary['generated_with_dst_conflict'])
+                    self.assertEqual(0, summary['skipped_missing_timestamp'])
+                    self.assertEqual(0, summary['skipped_dst_conflict'])
+                    self.assertEqual(1, summary['skipped_invalid_coordinates'])
+                    untimed_warnings = [
+                        message for message in messages
+                        if 'exported without timeline metadata' in message
+                    ]
+                    self.assertEqual(1, len(untimed_warnings))
+                    self.assertIn('source rows: 6, 7, 8, 9, 10, 11, 12, 13',
+                                  untimed_warnings[0])
+                    dst_warnings = [
+                        message for message in messages
+                        if 'daylight-saving transition' in message
+                    ]
+                    self.assertEqual(1, len(dst_warnings))
+                    self.assertIn('source rows: 12, 13', dst_warnings[0])
+
+                    kml_anchors = {
+                        metadata['osloc_event_id']: metadata
+                        for placemark in ET.fromstring(kml_text).findall(
+                            './/kml:Placemark', KML_NAMESPACE
+                        )
+                        if (metadata := parse_kml_extended_data(placemark)).get(
+                            'osloc_event_label'
+                        )
+                    }
+                    geojson_anchors = {
+                        properties['osloc_event_id']: properties
+                        for feature in json.loads(geojson_text)['features']
+                        if (properties := feature['properties']).get('osloc_event_label')
+                    }
+                    self.assertEqual(kml_anchors.keys(), geojson_anchors.keys())
+                    for event_id, metadata in kml_anchors.items():
+                        properties = geojson_anchors[event_id]
+                        for key, value in metadata.items():
+                            self.assertEqual(value, str(properties[key]), key)
+                        if int(event_id.split('_')[1]) <= 8:
+                            self.assertIn('date/time unavailable',
+                                          metadata['osloc_event_label'])
+                            self.assertNotIn('osloc_start_time', metadata)
+                            self.assertNotIn('osloc_local_start_time', metadata)
+                        else:
+                            expected_start = (
+                                '2024-11-03T05:30:00Z' if event_id == 'event_000009'
+                                else '2024-11-03T06:30:00Z'
+                            )
+                            self.assertEqual(expected_start, metadata['osloc_start_time'])
+                    root = ET.fromstring(kml_text)
+                    for placemark in root.findall('.//kml:Placemark', KML_NAMESPACE):
+                        metadata = parse_kml_extended_data(placemark)
+                        if int(metadata['osloc_event_id'].split('_')[1]) <= 8:
+                            self.assertIsNone(placemark.find('kml:TimeSpan', KML_NAMESPACE))
 
     def test_markers_are_exported_for_every_primary_record_type(self):
         marker = {

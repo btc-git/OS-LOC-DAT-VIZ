@@ -494,7 +494,8 @@ class GenerationActionTests(unittest.TestCase):
         self.addCleanup(dialog.close)
         text = "\n".join(label.text() for label in dialog.findChildren(QLabel))
         for phrase in (
-            "paired preliminary KML and GeoJSON",
+            "Preliminary Visualization Only",
+            "KML and GeoJSON visualizations",
             "Process and Open in Viewer",
             "Open Viewer",
             "Load GeoJSON",
@@ -504,11 +505,26 @@ class GenerationActionTests(unittest.TestCase):
             "separate cell site list",
             "Reference Cell Sites",
             "initially 0",
-            "Zero means unknown accuracy",
+            "A zero default means no accuracy radius is assumed",
+            "A source accuracy value of zero also means unknown accuracy",
+            "Azimuth is measured in degrees",
             "Invalid accuracy produces a point",
-            "Fractional seconds in text timestamps are discarded",
-            "Location Point records with missing timestamps are omitted",
-            "GeoJSON in the included GeoLibre viewer",
+            "Other date and time options:",
+            "Excel stores as numbers",
+            "such as -05:00",
+            "a Date column and a Time column",
+            "March 4 or April 3",
+            "14:30:00.123 is treated as 14:30:00",
+            "A time without a date uses today's date",
+            "Missing or unreadable dates and times:",
+            "For all record types",
+            "date/time unavailable",
+            "cannot confirm that they fall within your selected range",
+            "GeoJSON output in the included GeoLibre viewer",
+            "No RF Coverage Estimates",
+            "additional points of interest",
+            "map area being requested",
+            "Invalid accuracy produces a point without an accuracy circle, even when a positive default is configured",
             "performance still depends",
             "Show All",
             "From/Through",
@@ -516,11 +532,14 @@ class GenerationActionTests(unittest.TestCase):
             "one running instance per Windows session",
             "map services",
             "OpenFreeMap",
-            "IP address and viewed map area",
+            "IP address and the map area being requested",
         ):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, text)
         self.assertNotIn("milliseconds auto-handled", text)
+        self.assertNotIn("additonal", text)
+        self.assertNotIn("RF coverages", text)
+        self.assertNotIn("18+ timestamp formats", text)
 
     def test_main_timezone_defaults_match_import_wizard(self):
         with patch.object(MainWindow, "show_disclaimer_dialog"):
@@ -1060,6 +1079,10 @@ class GenerationActionTests(unittest.TestCase):
                 "reference_sites_considered": 12,
                 "reference_sites_generated": 5,
                 "markers_generated": 3,
+                "generated_without_timeline": 4,
+                "generated_with_dst_conflict": 2,
+                "skipped_missing_timestamp": 0,
+                "skipped_dst_conflict": 0,
             })
 
             log_text = window.build_generation_log(output_path)
@@ -1068,6 +1091,13 @@ class GenerationActionTests(unittest.TestCase):
             )
 
             self.assertIn("Cell site list file: cell_sites.csv", log_text)
+            self.assertIn("Generated without timeline metadata: 4", log_text)
+            self.assertIn(
+                "Generated without timeline metadata - DST conflict: 2",
+                log_text,
+            )
+            self.assertIn("Skipped - missing timestamp: 0", log_text)
+            self.assertIn("Skipped - DST conflict: 0", log_text)
             self.assertIn("Record type: Distance from Cell Site", log_text)
             self.assertNotIn("tower", log_text.lower())
             self.assertIn(

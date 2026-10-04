@@ -1436,10 +1436,12 @@ class ImportWizardDialog(QDialog):
             )
         required_text = ', '.join([
             *(self.application_field_label(field, data_type) for field in required),
-            timestamp_requirement,
         ])
         self.mapping_note.setText(
-            f"Required in original records: {required_text}. {note}"
+            f"Required in original records: {required_text or 'Cell site join IDs below'}. "
+            f"{timestamp_requirement} is optional unless filtering by date/time. "
+            "For separate columns, map both Date and Time or leave both unmapped. "
+            f"Records without dates/times are mapped without timeline times. {note}"
         )
         self.update_cell_site_controls()
         self.update_preview_headers()
@@ -2303,11 +2305,17 @@ class ImportWizardDialog(QDialog):
             required.append('Distance')
 
         missing = [field for field in required if not mappings[field]]
-        if self.timestamp_layout_combo.currentData() == 'separate':
+        separate_timestamp = self.timestamp_layout_combo.currentData() == 'separate'
+        if separate_timestamp:
             has_timestamp = bool(mappings.get('Date') and mappings.get('Time'))
         else:
             has_timestamp = bool(mappings.get('Timestamp'))
-        if not has_timestamp:
+        partial_timestamp = separate_timestamp and bool(
+            mappings.get('Date') or mappings.get('Time')
+        ) and not has_timestamp
+        if partial_timestamp or (
+            self.filter_enabled_checkbox.isChecked() and not has_timestamp
+        ):
             missing.append('Timestamp or Date + Time')
         if missing:
             QMessageBox.warning(self, "Incomplete Mapping", f"Map the following required fields:\n\n{', '.join(missing)}")

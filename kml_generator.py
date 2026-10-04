@@ -1073,35 +1073,31 @@ class KMLGenerator(QThread):
                 continue
             lat, lon, lat_source_text, lon_source_text = coordinates
             
-            # Use timestamp if available, otherwise use a generic label
             timestamp_missing = self.is_missing_timestamp(timestamp)
-            if timestamp_missing:
-                timestamp = f"Entry {idx + 1}"
             
             # Generate sector or circle based on azimuth availability
-            try:
-                if azimuth is not None:
-                    event_metadata = self.create_event_metadata(
-                        idx, timestamp, EVENT_TYPES['tower_sector'], row
-                    )
-                    placemarks += self.maybe_flatten_event_fragment(self.create_sector_placemark(
-                        lat, lon, azimuth, event_metadata, lat_source_text,
-                        lon_source_text
-                    ))
-                else:
-                    missing_azimuth_count += 1
-                    # Create 360-degree circle instead of directional wedge
-                    event_metadata = self.create_event_metadata(
-                        idx, timestamp, EVENT_TYPES['tower_no_azimuth'], row
-                    )
-                    placemarks += self.maybe_flatten_event_fragment(self.create_circle_placemark(
-                        lat, lon, event_metadata, lat_source_text, lon_source_text
-                    ))
-                if timestamp_missing or event_metadata['timestamp_parse_failed']:
-                    untimed_timestamp_rows.append(event_metadata['source_row'])
-                generated_count += 1
-            except TimestampResolutionError:
-                dst_conflict_rows.append(idx + 1)
+            if azimuth is not None:
+                event_metadata = self.create_event_metadata(
+                    idx, timestamp, EVENT_TYPES['tower_sector'], row
+                )
+                placemarks += self.maybe_flatten_event_fragment(self.create_sector_placemark(
+                    lat, lon, azimuth, event_metadata, lat_source_text,
+                    lon_source_text
+                ))
+            else:
+                missing_azimuth_count += 1
+                # Create 360-degree circle instead of directional wedge
+                event_metadata = self.create_event_metadata(
+                    idx, timestamp, EVENT_TYPES['tower_no_azimuth'], row
+                )
+                placemarks += self.maybe_flatten_event_fragment(self.create_circle_placemark(
+                    lat, lon, event_metadata, lat_source_text, lon_source_text
+                ))
+            if timestamp_missing or event_metadata['timestamp_parse_failed']:
+                untimed_timestamp_rows.append(event_metadata['source_row'])
+            if event_metadata['timestamp_dst_conflict']:
+                dst_conflict_rows.append(event_metadata['source_row'])
+            generated_count += 1
         
         # Report missing azimuth data
         if missing_azimuth_count > 0:
@@ -1117,7 +1113,8 @@ class KMLGenerator(QThread):
             'generated_rows': generated_count,
             'skipped_invalid_coordinates': invalid_coordinate_count,
             'skipped_missing_timestamp': 0,
-            'skipped_dst_conflict': len(dst_conflict_rows),
+            'skipped_dst_conflict': 0,
+            'generated_with_dst_conflict': len(dst_conflict_rows),
             'generated_without_timeline': len(untimed_timestamp_rows),
         }
 
@@ -1180,65 +1177,61 @@ class KMLGenerator(QThread):
                 continue
             lat, lon, lat_source_text, lon_source_text = coordinates
             
-            # Use timestamp if available, otherwise use a generic label
             timestamp_missing = self.is_missing_timestamp(timestamp)
-            if timestamp_missing:
-                timestamp = f"Entry {idx + 1}"
             
             # Determine visualization based on available data
             has_azimuth = azimuth is not None
             has_distance = distance is not None and distance >= 0
             
-            try:
-                if has_azimuth and has_distance:
-                    # Case 1: Has both azimuth and distance - create combined site/sector + distance arc visualization
-                    distance_miles = self.convert_ta_distance_to_miles(distance, self.settings.get('ta_distance_units', 'Meters'))
-                    event_metadata = self.create_event_metadata(
-                        idx, timestamp, EVENT_TYPES['tower_sector_distance'], row
-                    )
-                    placemarks += self.maybe_flatten_event_fragment(self.create_combined_sector_and_arc(
-                        lat, lon, azimuth, distance_miles, event_metadata,
-                        lat_source_text, lon_source_text
-                    ))
+            if has_azimuth and has_distance:
+                # Case 1: Has both azimuth and distance - create combined site/sector + distance arc visualization
+                distance_miles = self.convert_ta_distance_to_miles(distance, self.settings.get('ta_distance_units', 'Meters'))
+                event_metadata = self.create_event_metadata(
+                    idx, timestamp, EVENT_TYPES['tower_sector_distance'], row
+                )
+                placemarks += self.maybe_flatten_event_fragment(self.create_combined_sector_and_arc(
+                    lat, lon, azimuth, distance_miles, event_metadata,
+                    lat_source_text, lon_source_text
+                ))
 
-                elif has_azimuth and not has_distance:
-                    # Case 2: Has azimuth but missing distance - create directional wedge
-                    missing_distance_count += 1
-                    event_metadata = self.create_event_metadata(
-                        idx, timestamp, EVENT_TYPES['tower_sector'], row
-                    )
-                    placemarks += self.maybe_flatten_event_fragment(self.create_sector_placemark(
-                        lat, lon, azimuth, event_metadata, lat_source_text,
-                        lon_source_text
-                    ))
+            elif has_azimuth and not has_distance:
+                # Case 2: Has azimuth but missing distance - create directional wedge
+                missing_distance_count += 1
+                event_metadata = self.create_event_metadata(
+                    idx, timestamp, EVENT_TYPES['tower_sector'], row
+                )
+                placemarks += self.maybe_flatten_event_fragment(self.create_sector_placemark(
+                    lat, lon, azimuth, event_metadata, lat_source_text,
+                    lon_source_text
+                ))
 
-                elif not has_azimuth and has_distance:
-                    # Case 3: Missing azimuth but has distance - create distance band (donut/pizza-crust visualization)
-                    missing_azimuth_count += 1
-                    distance_miles = self.convert_ta_distance_to_miles(distance, self.settings.get('ta_distance_units', 'Meters'))
-                    event_metadata = self.create_event_metadata(
-                        idx, timestamp, EVENT_TYPES['distance_only'], row
-                    )
-                    placemarks += self.maybe_flatten_event_fragment(self.create_distance_band(
-                        lat, lon, distance_miles, event_metadata,
-                        lat_source_text, lon_source_text
-                    ))
+            elif not has_azimuth and has_distance:
+                # Case 3: Missing azimuth but has distance - create distance band (donut/pizza-crust visualization)
+                missing_azimuth_count += 1
+                distance_miles = self.convert_ta_distance_to_miles(distance, self.settings.get('ta_distance_units', 'Meters'))
+                event_metadata = self.create_event_metadata(
+                    idx, timestamp, EVENT_TYPES['distance_only'], row
+                )
+                placemarks += self.maybe_flatten_event_fragment(self.create_distance_band(
+                    lat, lon, distance_miles, event_metadata,
+                    lat_source_text, lon_source_text
+                ))
 
-                else:
-                    # Case 4: Missing both azimuth and distance - create 360° circle using shaded area length
-                    missing_azimuth_count += 1
-                    missing_distance_count += 1
-                    event_metadata = self.create_event_metadata(
-                        idx, timestamp, EVENT_TYPES['tower_no_azimuth'], row
-                    )
-                    placemarks += self.maybe_flatten_event_fragment(self.create_circle_placemark(
-                        lat, lon, event_metadata, lat_source_text, lon_source_text
-                    ))
-                if timestamp_missing or event_metadata['timestamp_parse_failed']:
-                    untimed_timestamp_rows.append(event_metadata['source_row'])
-                generated_count += 1
-            except TimestampResolutionError:
-                dst_conflict_rows.append(idx + 1)
+            else:
+                # Case 4: Missing both azimuth and distance - create 360° circle using shaded area length
+                missing_azimuth_count += 1
+                missing_distance_count += 1
+                event_metadata = self.create_event_metadata(
+                    idx, timestamp, EVENT_TYPES['tower_no_azimuth'], row
+                )
+                placemarks += self.maybe_flatten_event_fragment(self.create_circle_placemark(
+                    lat, lon, event_metadata, lat_source_text, lon_source_text
+                ))
+            if timestamp_missing or event_metadata['timestamp_parse_failed']:
+                untimed_timestamp_rows.append(event_metadata['source_row'])
+            if event_metadata['timestamp_dst_conflict']:
+                dst_conflict_rows.append(event_metadata['source_row'])
+            generated_count += 1
         
         # Report missing data
         if missing_azimuth_count > 0:
@@ -1256,7 +1249,8 @@ class KMLGenerator(QThread):
             'generated_rows': generated_count,
             'skipped_invalid_coordinates': invalid_coordinate_count,
             'skipped_missing_timestamp': 0,
-            'skipped_dst_conflict': len(dst_conflict_rows),
+            'skipped_dst_conflict': 0,
+            'generated_with_dst_conflict': len(dst_conflict_rows),
             'generated_without_timeline': len(untimed_timestamp_rows),
         }
 
@@ -1296,7 +1290,6 @@ class KMLGenerator(QThread):
         invalid_accuracy_count = 0
         zero_accuracy_count = 0
         invalid_coordinate_count = 0
-        missing_timestamp_count = 0
         dst_conflict_rows = []
         untimed_timestamp_rows = []
         generated_count = 0
@@ -1313,9 +1306,6 @@ class KMLGenerator(QThread):
             if coordinates is None:
                 invalid_coordinate_count += 1
                 continue
-            if self.is_missing_timestamp(timestamp):
-                missing_timestamp_count += 1
-                continue
             lat, lon, lat_source_text, lon_source_text = coordinates
             
             radius_miles, accuracy_display, accuracy_outcome = (
@@ -1329,24 +1319,23 @@ class KMLGenerator(QThread):
                 zero_accuracy_count += 1
             
             # Create location point accuracy circle
-            try:
-                event_type = (
-                    EVENT_TYPES['location_accuracy']
-                    if radius_miles is not None
-                    else EVENT_TYPES['location']
-                )
-                event_metadata = self.create_event_metadata(
-                    idx, timestamp, event_type, row
-                )
-                placemarks += self.maybe_flatten_event_fragment(self.create_gps_accuracy_circle(
-                    lat, lon, radius_miles, event_metadata, lat_source_text,
-                    lon_source_text, accuracy_display
-                ))
-                if event_metadata['timestamp_parse_failed']:
-                    untimed_timestamp_rows.append(event_metadata['source_row'])
-                generated_count += 1
-            except TimestampResolutionError:
-                dst_conflict_rows.append(idx + 1)
+            event_type = (
+                EVENT_TYPES['location_accuracy']
+                if radius_miles is not None
+                else EVENT_TYPES['location']
+            )
+            event_metadata = self.create_event_metadata(
+                idx, timestamp, event_type, row
+            )
+            placemarks += self.maybe_flatten_event_fragment(self.create_gps_accuracy_circle(
+                lat, lon, radius_miles, event_metadata, lat_source_text,
+                lon_source_text, accuracy_display
+            ))
+            if self.is_missing_timestamp(timestamp) or event_metadata['timestamp_parse_failed']:
+                untimed_timestamp_rows.append(event_metadata['source_row'])
+            if event_metadata['timestamp_dst_conflict']:
+                dst_conflict_rows.append(event_metadata['source_row'])
+            generated_count += 1
         
         # Report missing accuracy data
         if missing_accuracy_count > 0:
@@ -1362,8 +1351,6 @@ class KMLGenerator(QThread):
             self.status_message.emit(f"⚠️ Location Point Data: {zero_accuracy_count} points had zero accuracy data - accuracy unknown, not exact; displayed as points without accuracy circles")
         if invalid_coordinate_count > 0:
             self.status_message.emit(f"⚠️ Location Point Data: {invalid_coordinate_count} rows were skipped because latitude or longitude was missing or invalid")
-        if missing_timestamp_count > 0:
-            self.status_message.emit(f"⚠️ Location Point Data: {missing_timestamp_count} rows were skipped because the timestamp was missing")
         self.report_untimed_timestamps(
             "Location Point Data", untimed_timestamp_rows
         )
@@ -1372,8 +1359,9 @@ class KMLGenerator(QThread):
             'input_rows': total_rows,
             'generated_rows': generated_count,
             'skipped_invalid_coordinates': invalid_coordinate_count,
-            'skipped_missing_timestamp': missing_timestamp_count,
-            'skipped_dst_conflict': len(dst_conflict_rows),
+            'skipped_missing_timestamp': 0,
+            'skipped_dst_conflict': 0,
+            'generated_with_dst_conflict': len(dst_conflict_rows),
             'generated_without_timeline': len(untimed_timestamp_rows),
         }
 
@@ -1565,13 +1553,13 @@ class KMLGenerator(QThread):
         return latitude_float, longitude_float, latitude_text, longitude_text
 
     def report_dst_conflicts(self, data_type, row_numbers):
-        """Report records omitted because a named timezone did not identify one instant."""
+        """Report records retained without choosing a daylight-saving instant."""
         if not row_numbers:
             return
         rows = ", ".join(str(row_number) for row_number in row_numbers[:10])
         suffix = "..." if len(row_numbers) > 10 else ""
         self.status_message.emit(
-            f"⚠️ {data_type}: {len(row_numbers)} rows were omitted because their local times were ambiguous or nonexistent during a daylight-saving transition (data rows: {rows}{suffix}). Use an explicit UTC offset to resolve them."
+            f"⚠️ {data_type}: {len(row_numbers)} rows were mapped without a date/time because their local times were ambiguous or nonexistent during a daylight-saving transition (source rows: {rows}{suffix}). Use an explicit UTC offset to resolve them."
         )
 
     def report_untimed_timestamps(self, data_type, row_numbers):
@@ -1581,8 +1569,8 @@ class KMLGenerator(QThread):
         rows = ", ".join(str(row_number) for row_number in row_numbers[:10])
         suffix = "..." if len(row_numbers) > 10 else ""
         self.status_message.emit(
-            f"⚠️ {data_type}: {len(row_numbers)} rows had missing or "
-            "unparseable timestamps and were exported without timeline metadata "
+            f"⚠️ {data_type}: {len(row_numbers)} rows had missing, unreadable, or "
+            "unresolved dates/times and were exported without timeline metadata "
             f"(source rows: {rows}{suffix})."
         )
 
@@ -1980,13 +1968,22 @@ class KMLGenerator(QThread):
 
     def create_event_metadata(self, row_position, timestamp, event_type, row=None):
         """Create metadata once for every component of one logical input row."""
-        kml_timestamp, display_label, source_timezone, timezone_description = (
-            self.parse_timestamp_details(timestamp)
-        )
+        timestamp_dst_conflict = False
+        try:
+            kml_timestamp, display_label, source_timezone, timezone_description = (
+                self.parse_timestamp_details(timestamp)
+            )
+        except TimestampResolutionError:
+            timestamp_dst_conflict = True
+            kml_timestamp, display_label, source_timezone, timezone_description = (
+                None, None, None, None
+            )
         timestamp_parse_failed = (
             kml_timestamp is None
             and not self.is_missing_timestamp(timestamp)
         )
+        if kml_timestamp is None:
+            display_label = f"Entry {row_position + 1} (date/time unavailable)"
         time_range = self.create_time_range(kml_timestamp)
         display_timezone, display_timezone_description = self.resolve_display_timezone(
             source_timezone, timezone_description
@@ -2002,6 +1999,7 @@ class KMLGenerator(QThread):
             'event_type': event_type,
             'display_label': display_label,
             'timestamp_parse_failed': bool(timestamp_parse_failed),
+            'timestamp_dst_conflict': timestamp_dst_conflict,
             'time_range': time_range,
             'local_time_range': local_time_range,
             'timezone': display_timezone_description,
@@ -2357,31 +2355,25 @@ class KMLGenerator(QThread):
             if coordinates is None:
                 continue
             lat, lon, lat_source_text, lon_source_text = coordinates
-            if self.is_missing_timestamp(timestamp):
-                timestamp = f"Entry {idx + 1}"
-
-            try:
-                if azimuth is not None:
-                    event_metadata = self.create_event_metadata(
-                        idx, timestamp, EVENT_TYPES['tower_sector'], row
-                    )
-                    fragment = self.create_sector_placemark(
-                        lat, lon, azimuth, event_metadata, lat_source_text,
-                        lon_source_text
-                    )
-                else:
-                    event_metadata = self.create_event_metadata(
-                        idx, timestamp, EVENT_TYPES['tower_no_azimuth'], row
-                    )
-                    fragment = self.create_circle_placemark(
-                        lat, lon, event_metadata, lat_source_text, lon_source_text
-                    )
-                features.extend(self.geojson_features_from_event_fragment(
-                    fragment,
-                    self.source_geojson_properties(lat_source_text, lon_source_text),
-                ))
-            except TimestampResolutionError:
-                continue
+            if azimuth is not None:
+                event_metadata = self.create_event_metadata(
+                    idx, timestamp, EVENT_TYPES['tower_sector'], row
+                )
+                fragment = self.create_sector_placemark(
+                    lat, lon, azimuth, event_metadata, lat_source_text,
+                    lon_source_text
+                )
+            else:
+                event_metadata = self.create_event_metadata(
+                    idx, timestamp, EVENT_TYPES['tower_no_azimuth'], row
+                )
+                fragment = self.create_circle_placemark(
+                    lat, lon, event_metadata, lat_source_text, lon_source_text
+                )
+            features.extend(self.geojson_features_from_event_fragment(
+                fragment,
+                self.source_geojson_properties(lat_source_text, lon_source_text),
+            ))
 
         features.extend(self.reference_site_geojson_features(df, dataset_name))
         features.extend(self.marker_geojson_features(dataset_name))
@@ -2405,57 +2397,52 @@ class KMLGenerator(QThread):
             if coordinates is None:
                 continue
             lat, lon, lat_source_text, lon_source_text = coordinates
-            if self.is_missing_timestamp(timestamp):
-                timestamp = f"Entry {idx + 1}"
 
             has_azimuth = azimuth is not None
             has_distance = distance is not None and distance >= 0
 
-            try:
-                if has_azimuth and has_distance:
-                    distance_miles = self.convert_ta_distance_to_miles(
-                        distance, self.settings.get('ta_distance_units', 'Meters')
-                    )
-                    event_metadata = self.create_event_metadata(
-                        idx, timestamp, EVENT_TYPES['tower_sector_distance'], row
-                    )
-                    fragment = self.create_combined_sector_and_arc(
-                        lat, lon, azimuth, distance_miles, event_metadata,
-                        lat_source_text, lon_source_text
-                    )
-                elif has_azimuth and not has_distance:
-                    event_metadata = self.create_event_metadata(
-                        idx, timestamp, EVENT_TYPES['tower_sector'], row
-                    )
-                    fragment = self.create_sector_placemark(
-                        lat, lon, azimuth, event_metadata, lat_source_text,
-                        lon_source_text
-                    )
-                elif not has_azimuth and has_distance:
-                    distance_miles = self.convert_ta_distance_to_miles(
-                        distance, self.settings.get('ta_distance_units', 'Meters')
-                    )
-                    event_metadata = self.create_event_metadata(
-                        idx, timestamp, EVENT_TYPES['distance_only'], row
-                    )
-                    fragment = self.create_distance_band(
-                        lat, lon, distance_miles, event_metadata,
-                        lat_source_text, lon_source_text
-                    )
-                else:
-                    event_metadata = self.create_event_metadata(
-                        idx, timestamp, EVENT_TYPES['tower_no_azimuth'], row
-                    )
-                    fragment = self.create_circle_placemark(
-                        lat, lon, event_metadata, lat_source_text, lon_source_text
-                    )
+            if has_azimuth and has_distance:
+                distance_miles = self.convert_ta_distance_to_miles(
+                    distance, self.settings.get('ta_distance_units', 'Meters')
+                )
+                event_metadata = self.create_event_metadata(
+                    idx, timestamp, EVENT_TYPES['tower_sector_distance'], row
+                )
+                fragment = self.create_combined_sector_and_arc(
+                    lat, lon, azimuth, distance_miles, event_metadata,
+                    lat_source_text, lon_source_text
+                )
+            elif has_azimuth and not has_distance:
+                event_metadata = self.create_event_metadata(
+                    idx, timestamp, EVENT_TYPES['tower_sector'], row
+                )
+                fragment = self.create_sector_placemark(
+                    lat, lon, azimuth, event_metadata, lat_source_text,
+                    lon_source_text
+                )
+            elif not has_azimuth and has_distance:
+                distance_miles = self.convert_ta_distance_to_miles(
+                    distance, self.settings.get('ta_distance_units', 'Meters')
+                )
+                event_metadata = self.create_event_metadata(
+                    idx, timestamp, EVENT_TYPES['distance_only'], row
+                )
+                fragment = self.create_distance_band(
+                    lat, lon, distance_miles, event_metadata,
+                    lat_source_text, lon_source_text
+                )
+            else:
+                event_metadata = self.create_event_metadata(
+                    idx, timestamp, EVENT_TYPES['tower_no_azimuth'], row
+                )
+                fragment = self.create_circle_placemark(
+                    lat, lon, event_metadata, lat_source_text, lon_source_text
+                )
 
-                features.extend(self.geojson_features_from_event_fragment(
-                    fragment,
-                    self.source_geojson_properties(lat_source_text, lon_source_text),
-                ))
-            except TimestampResolutionError:
-                continue
+            features.extend(self.geojson_features_from_event_fragment(
+                fragment,
+                self.source_geojson_properties(lat_source_text, lon_source_text),
+            ))
 
         features.extend(self.reference_site_geojson_features(df, dataset_name))
         features.extend(self.marker_geojson_features(dataset_name))
@@ -2472,7 +2459,7 @@ class KMLGenerator(QThread):
                 row, ['GPS Accuracy', 'Accuracy', 'gps_accuracy', 'accuracy']
             )
 
-            if coordinates is None or self.is_missing_timestamp(timestamp):
+            if coordinates is None:
                 continue
             lat, lon, lat_source_text, lon_source_text = coordinates
 
@@ -2480,25 +2467,22 @@ class KMLGenerator(QThread):
                 gps_accuracy
             )
 
-            try:
-                event_type = (
-                    EVENT_TYPES['location_accuracy']
-                    if radius_miles is not None
-                    else EVENT_TYPES['location']
-                )
-                event_metadata = self.create_event_metadata(
-                    idx, timestamp, event_type, row
-                )
-                fragment = self.create_gps_accuracy_circle(
-                    lat, lon, radius_miles, event_metadata, lat_source_text,
-                    lon_source_text, accuracy_display
-                )
-                features.extend(self.geojson_features_from_event_fragment(
-                    fragment,
-                    self.source_geojson_properties(lat_source_text, lon_source_text),
-                ))
-            except TimestampResolutionError:
-                continue
+            event_type = (
+                EVENT_TYPES['location_accuracy']
+                if radius_miles is not None
+                else EVENT_TYPES['location']
+            )
+            event_metadata = self.create_event_metadata(
+                idx, timestamp, event_type, row
+            )
+            fragment = self.create_gps_accuracy_circle(
+                lat, lon, radius_miles, event_metadata, lat_source_text,
+                lon_source_text, accuracy_display
+            )
+            features.extend(self.geojson_features_from_event_fragment(
+                fragment,
+                self.source_geojson_properties(lat_source_text, lon_source_text),
+            ))
 
         features.extend(self.marker_geojson_features(dataset_name))
         return self.create_geojson_collection(dataset_name, features)

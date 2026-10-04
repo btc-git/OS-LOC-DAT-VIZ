@@ -760,7 +760,7 @@ class KMLTemporalMetadataTests(unittest.TestCase):
             )[0],
         )
 
-    def test_missing_timestamp_outcomes_match_record_type_policy(self):
+    def test_missing_timestamp_outcomes_are_consistent_for_all_record_types(self):
         tower_cases = (
             ('Tower/Sector', 'generate_cell_tower_kml', {'Azimuth': 240}),
             (
@@ -768,6 +768,7 @@ class KMLTemporalMetadataTests(unittest.TestCase):
                 'generate_distance_from_tower_kml',
                 {'Azimuth': 240, 'Distance': 2.0},
             ),
+            ('Location Point', 'generate_gps_kml', {'Accuracy': 100}),
         )
         for data_type, method_name, fields in tower_cases:
             with self.subTest(data_type=data_type):
@@ -816,12 +817,12 @@ class KMLTemporalMetadataTests(unittest.TestCase):
         ])))
 
         self.assertTrue(gps_root.findall('.//kml:Placemark', KML_NAMESPACE))
-        self.assertEqual(1, gps_generator.audit_summary['generated_rows'])
-        self.assertEqual(1, gps_generator.audit_summary['skipped_missing_timestamp'])
+        self.assertEqual(2, gps_generator.audit_summary['generated_rows'])
+        self.assertEqual(0, gps_generator.audit_summary['skipped_missing_timestamp'])
         self.assertEqual(
-            1, gps_generator.audit_summary['generated_without_timeline']
+            2, gps_generator.audit_summary['generated_without_timeline']
         )
-        self.assertEqual(1, len([
+        self.assertEqual(0, len([
             message for message in gps_messages
             if 'timestamp was missing' in message
         ]))

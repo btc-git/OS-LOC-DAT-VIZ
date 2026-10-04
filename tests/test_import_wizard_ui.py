@@ -238,6 +238,93 @@ class ImportWizardDialogUITests(unittest.TestCase):
             dialog.filter_timezone_note.text(),
         )
 
+    def test_datetime_filter_excludes_unknown_times_for_every_record_type(self):
+        records = pd.DataFrame([
+            {'Timestamp': timestamp, 'Latitude': 43.15, 'Longitude': -77.61}
+            for timestamp in (
+                None, 'not a timestamp', '2024-11-03 01:30:00',
+                '2024-03-10 02:30:00', '2024-11-03T01:30:00-04:00',
+                '2024-11-03T01:30:00-05:00', '2024-11-04 12:00:00',
+            )
+        ])
+        dialog = ImportWizardDialog()
+        self.addCleanup(dialog.close)
+        eastern_index = next(
+            index for index in range(dialog.source_timezone_combo.count())
+            if (dialog.source_timezone_combo.itemData(index) or {}).get(
+                'timezone_name'
+            ) == 'America/New_York'
+        )
+        dialog.source_timezone_combo.setCurrentIndex(eastern_index)
+        dialog.date_order_combo.setCurrentIndex(dialog.date_order_combo.findData('YMD'))
+        dialog.filter_enabled_checkbox.setChecked(True)
+        selected_day = QDateTime.fromString(
+            '2024-11-03 12:00:00', 'yyyy-MM-dd HH:mm:ss'
+        )
+        dialog.filter_start_edit.setDateTime(selected_day)
+        dialog.filter_end_edit.setDateTime(selected_day)
+        for index in range(dialog.record_type_combo.count()):
+            dialog.record_type_combo.setCurrentIndex(index)
+            with self.subTest(data_type=dialog.record_type_combo.currentData()):
+                filtered, metadata = dialog.apply_datetime_filter(records)
+                self.assertEqual([4, 5], filtered.index.tolist())
+                self.assertEqual(4, metadata['unparseable_rows'])
+                dialog.filter_enabled_checkbox.setChecked(False)
+                unfiltered, metadata = dialog.apply_datetime_filter(records)
+                self.assertEqual(records.index.tolist(), unfiltered.index.tolist())
+                self.assertFalse(metadata['enabled'])
+                dialog.filter_enabled_checkbox.setChecked(True)
+
+    def test_import_without_timestamp_mapping_is_allowed_only_without_filtering(self):
+        for data_type in ('Tower/Sector', 'Distance from Tower', 'Location Point'):
+            for layout in ('combined', 'separate'):
+                with self.subTest(data_type=data_type, layout=layout):
+                    dialog = ImportWizardDialog()
+                    self.addCleanup(dialog.close)
+                    dialog.source_dataframe = pd.DataFrame([{
+                        'Latitude': 43.15, 'Longitude': -77.61,
+                        'Azimuth': 240, 'Distance': 2.0, 'Accuracy': 100,
+                    }])
+                    dialog.populate_mapping_options()
+                    dialog.record_type_combo.setCurrentIndex(
+                        dialog.record_type_combo.findData(data_type)
+                    )
+                    dialog.timestamp_layout_combo.setCurrentIndex(
+                        dialog.timestamp_layout_combo.findData(layout)
+                    )
+                    self.assertIn('optional unless filtering by date/time',
+                                  dialog.mapping_note.text())
+                    with patch('import_wizard.QMessageBox.warning') as warning:
+                        dialog.filter_enabled_checkbox.setChecked(True)
+                        dialog.accept_import()
+                        warning.assert_called_once()
+                        self.assertIn('Timestamp or Date + Time',
+                                      warning.call_args.args[2])
+                        warning.reset_mock()
+                        dialog.filter_enabled_checkbox.setChecked(False)
+                        dialog.accept_import()
+                        warning.assert_not_called()
+                    self.assertEqual(1, len(dialog.normalized_dataframe))
+                    self.assertEqual(data_type, dialog.selected_data_type)
+                    self.assertIsNone(KMLGenerator('', data_type, {}).get_timestamp_value(
+                        dialog.normalized_dataframe.iloc[0]
+                    ))
+
+    def test_partial_separate_timestamp_mapping_is_still_rejected(self):
+        dialog = ImportWizardDialog()
+        self.addCleanup(dialog.close)
+        dialog.source_dataframe = pd.DataFrame([{
+            'Date': '2024-01-15', 'Latitude': 43.15, 'Longitude': -77.61,
+        }])
+        dialog.populate_mapping_options()
+        dialog.timestamp_layout_combo.setCurrentIndex(
+            dialog.timestamp_layout_combo.findData('separate')
+        )
+        with patch('import_wizard.QMessageBox.warning') as warning:
+            dialog.accept_import()
+            warning.assert_called_once()
+            self.assertIn('Timestamp or Date + Time', warning.call_args.args[2])
+
     def test_coordinate_labels_distinguish_tower_and_location_records(self):
         dialog = ImportWizardDialog()
         self.assertEqual(

@@ -4,6 +4,9 @@
 
 ## [Unreleased]
 
+### Changed
+- All record types now retain usable location information when dates/times are missing, unreadable, or unresolved during daylight-saving transitions. Matching KML and GeoJSON events are labeled `date/time unavailable` without invented timeline times; warnings and the TXT log report the untimed records and daylight-saving conflicts. Import date/time filters remain strict and exclude records whose times cannot be confirmed within the selected range.
+
 ## [2.0.0-beta.1] - 2026-10-03
 
 ### Changed
